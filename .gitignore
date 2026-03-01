@@ -1,0 +1,6 @@
+# Build output
+dungeon_gen
+dungeon_generator
+
+# macOS
+.DS_Store
