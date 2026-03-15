@@ -243,7 +243,7 @@ dungeon_start_generation :: proc(d: ^Dungeon) {
 	if d.actual_seed == 0 {
 		d.actual_seed = u64(intrinsics.read_cycle_counter())
 	}
-	rand.set_global_seed(d.actual_seed)
+	rand.reset(d.actual_seed)
 }
 
 // ---------------------------------------------------------------------------

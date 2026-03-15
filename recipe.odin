@@ -457,12 +457,12 @@ recipe_save :: proc(recipe: ^Recipe, filepath: string) -> bool {
 	if err != nil do return false
 	defer delete(data)
 
-	return os.write_entire_file(filepath, data)
+	return os.write_entire_file(filepath, data) == nil
 }
 
 recipe_load :: proc(filepath: string) -> (Recipe, bool) {
-	data, ok := os.read_entire_file(filepath)
-	if !ok do return {}, false
+	data, read_err := os.read_entire_file(filepath, context.allocator)
+	if read_err != nil do return {}, false
 	defer delete(data)
 
 	jr: Json_Recipe
