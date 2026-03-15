@@ -218,234 +218,238 @@ draw_ui :: proc() {
 	}
 	defer imgui.End()
 
-	// ---- Status ----
-	if imgui.CollapsingHeader("Status", {.DefaultOpen}) {
-		cam_text: cstring = state.camera_mode == .Top_Down ? "Top-Down" : "Freeflight"
-		imgui.Text("Camera:     %s", cam_text)
+	// ---- Status (always visible) ----
+	cam_text: cstring = state.camera_mode == .Top_Down ? "Top-Down" : "Freeflight"
+	imgui.Text("Camera:     %s", cam_text)
 
-		gen_text: cstring
+	gen_text: cstring
+	if d.gen_done {
+		gen_text = "Done"
+	} else if d.current_step < len(d.recipe.steps) {
+		gen_text = STEP_TYPE_NAMES[d.recipe.steps[d.current_step].type]
+	} else {
+		gen_text = "Finishing..."
+	}
+	imgui.Text("Generation: %s", gen_text)
+	imgui.Text("Rooms: %d  Seed: %d  FPS: %d", len(d.modules), d.actual_seed, rl.GetFPS())
+
+	imgui.Spacing()
+
+	// ---- Actions (always visible) ----
+	half_width := (imgui.GetContentRegionAvail().x - imgui.GetStyle().ItemSpacing.x) * 0.5
+	if imgui.Button("Generate", {half_width, 0}) {
+		dungeon_generate_full(d)
+	}
+	imgui.SameLine()
+	if imgui.Button("Animated", {half_width, 0}) {
+		dungeon_start_generation(d)
+		state.gen_animated = true
+		state.gen_step_timer = 0
+	}
+	if imgui.Button("Step", {half_width, 0}) {
 		if d.gen_done {
-			gen_text = "Done"
-		} else if d.current_step < len(d.recipe.steps) {
-			gen_text = STEP_TYPE_NAMES[d.recipe.steps[d.current_step].type]
-		} else {
-			gen_text = "Finishing..."
-		}
-		imgui.Text("Generation: %s", gen_text)
-		imgui.Text("Rooms:      %d", len(d.modules))
-		imgui.Text("Seed:       %d", d.actual_seed)
-		imgui.Text("FPS:        %d", rl.GetFPS())
-	}
-
-	// ---- Recipe ----
-	if imgui.CollapsingHeader("Recipe", {.DefaultOpen}) {
-		// Preset combo
-		if imgui.BeginCombo("Preset", PRESET_NAMES[preset_selected]) {
-			for i in 0 ..< len(PRESET_NAMES) {
-				is_sel := i == preset_selected
-				if imgui.Selectable(PRESET_NAMES[i], is_sel) {
-					preset_selected = i
-					recipe_destroy(&d.recipe)
-					d.recipe = preset_recipe_by_index(preset_selected)
-				}
-				if is_sel do imgui.SetItemDefaultFocus()
-			}
-			imgui.EndCombo()
-		}
-
-		// Seed
-		seed_int := c.int(d.recipe.seed)
-		if imgui.DragInt("Seed (0=rand)", &seed_int, 1.0, 0, 99999) {
-			d.recipe.seed = u64(seed_int)
-		}
-
-		imgui.Separator()
-		imgui.Text("Steps:")
-
-		// Step list
-		remove_idx := -1
-		swap_idx := -1
-
-		for si in 0 ..< len(d.recipe.steps) {
-			step := &d.recipe.steps[si]
-			imgui.PushIDInt(c.int(si))
-
-			is_active := !d.gen_done && si == d.current_step
-			type_color := rl_color_to_vec4(STEP_TYPE_COLORS[step.type])
-			label := fmt.ctprintf("%d. %s", si + 1, STEP_TYPE_NAMES[step.type])
-
-			flags: imgui.TreeNodeFlags = {.OpenOnArrow, .SpanAvailWidth}
-			if is_active do flags |= {.Selected}
-
-			imgui.PushStyleColorImVec4(.Text, type_color)
-			is_open := imgui.TreeNodeEx(label, flags)
-			imgui.PopStyleColor()
-
-			// Right-aligned buttons on the same line
-			imgui.SameLine(imgui.GetWindowWidth() - 75)
-			if si > 0 {
-				if imgui.SmallButton("^") do swap_idx = si - 1
-			} else {
-				imgui.SmallButton("^") // disabled visually
-			}
-			imgui.SameLine()
-			if si < len(d.recipe.steps) - 1 {
-				if imgui.SmallButton("v") do swap_idx = si
-			} else {
-				imgui.SmallButton("v")
-			}
-			imgui.SameLine()
-			if imgui.SmallButton("X") do remove_idx = si
-
-			if is_open {
-				ui_step_params(step)
-				imgui.TreePop()
-			}
-
-			imgui.PopID()
-		}
-
-		// Deferred swap
-		if swap_idx >= 0 && swap_idx < len(d.recipe.steps) - 1 {
-			d.recipe.steps[swap_idx], d.recipe.steps[swap_idx + 1] = d.recipe.steps[swap_idx + 1], d.recipe.steps[swap_idx]
-		}
-
-		// Deferred remove
-		if remove_idx >= 0 && len(d.recipe.steps) > 0 {
-			ordered_remove(&d.recipe.steps, remove_idx)
-		}
-
-		imgui.Spacing()
-
-		// Add step
-		imgui.SetNextItemWidth(imgui.GetContentRegionAvail().x - 40)
-		if imgui.BeginCombo("##add_type", ADD_STEP_OPTIONS[add_step_type_selected]) {
-			for i in 0 ..< len(ADD_STEP_OPTIONS) {
-				is_sel := i == add_step_type_selected
-				if imgui.Selectable(ADD_STEP_OPTIONS[i], is_sel) {
-					add_step_type_selected = i
-				}
-				if is_sel do imgui.SetItemDefaultFocus()
-			}
-			imgui.EndCombo()
-		}
-		imgui.SameLine()
-		if imgui.Button("Add") {
-			new_step := make_step(ADD_STEP_TYPES[add_step_type_selected])
-			switch new_step.type {
-			case .Seed_Rooms:
-				new_step.seed_rooms = {count = 8}
-			case .Grow_Clusters:
-				new_step.grow_clusters = {chance = 0.4, min_rooms = 1, max_rooms = 4}
-			case .Connect_MST:
-				new_step.connect_mst = {manhattan_weight = 0.8}
-			case .Mark_Doors:
-			case .Add_Loops:
-				new_step.add_loops = {loop_chance = 0.3, max_extra = 4, manhattan_weight = 0.5}
-			case .Widen_Corridors:
-				new_step.widen_corridors = {width = 3}
-			case .BSP_Partition:
-				new_step.bsp_partition = {min_size = 8, padding = 2}
-			case .Fill_Dead_Ends:
-				new_step.fill_dead_ends = {iterations = 3}
-			case .Place_Grid:
-				new_step.place_grid = {cols = 3, rows = 3, jitter = 0.2}
-			case .Room_Corridor:
-				new_step.room_corridor = {strictness = 0.5, manhattan_weight = 0.8, max_chain = 6}
-			case .Define_Area:
-				new_step.define_area = {area_id = 0, shape = .Rectangle, x = 8, y = 8, w = 16, h = 16}
-			case .Pack_Rooms:
-				new_step.pack_rooms = {max_rooms = 0}
-			case .Join_Rooms:
-			case .Connect_Doors:
-				new_step.connect_doors = {mode = .Minimal, max_per_pair = 1}
-			case .Place_Specific:
-				new_step.place_specific = {template_index = 1, x = 30, y = 30, rotation = 0}
-			case .Mirror_Rooms:
-				new_step.mirror_rooms = {axis = .X, axis_pos = 0}
-			case .Place_Symmetric:
-				new_step.place_symmetric = {symmetry = .Mirror_X, axis_x = 0, axis_y = 0, max_rooms = 30}
-			case .Place_Perimeter:
-				new_step.place_perimeter = {gap_chance = 0.05, max_rooms = 0}
-			case .Place_Along_Line:
-				new_step.place_along_line = {x1 = 10, y1 = 32, x2 = 54, y2 = 32, door_side = 1, spacing = 0}
-			case .Fill_Area:
-				new_step.fill_area = {color_r = 120, color_g = 100, color_b = 70}
-			case .Wall_Border:
-				new_step.wall_border = {thickness = 2}
-			case .Connect_Linear:
-				new_step.connect_linear = {manhattan_weight = 0.8}
-			}
-			append(&d.recipe.steps, new_step)
-		}
-	}
-
-	// ---- Display ----
-	if imgui.CollapsingHeader("Display", {.DefaultOpen}) {
-		// Grid size combo
-		grid_val := c.int(grid_size_selected)
-		if imgui.BeginCombo("Grid Size", GRID_SIZE_OPTIONS[grid_size_selected]) {
-			for i in 0 ..< len(GRID_SIZE_OPTIONS) {
-				is_sel := i == grid_size_selected
-				if imgui.Selectable(GRID_SIZE_OPTIONS[i], is_sel) {
-					grid_size_selected = i
-					new_size := GRID_SIZE_VALUES[grid_size_selected]
-					if new_size != d.config.grid_width {
-						new_config := d.config
-						new_config.grid_width = new_size
-						new_config.grid_height = new_size
-						dungeon_destroy(d)
-						state.dungeon = dungeon_create(new_config)
-						d = &state.dungeon
-						d.recipe = preset_recipe_by_index(preset_selected)
-						state.topdown_camera = topdown_camera_create(d.config)
-						state.freeflight_cam = freeflight_camera_create(d.config)
-						dungeon_generate_full(d)
-					}
-				}
-				if is_sel do imgui.SetItemDefaultFocus()
-			}
-			imgui.EndCombo()
-		}
-
-		imgui.SliderFloat("Wall Height", &d.config.wall_height, 0.5, 4.0)
-		imgui.Checkbox("Show Ceilings", &show_ceilings)
-		imgui.Checkbox("Join Rooms", &join_rooms)
-		imgui.SliderFloat("Anim Speed", &gen_step_interval, 0.01, 0.3, "%.2fs")
-		imgui.Checkbox("Animated Mode", &state.gen_animated)
-	}
-
-	// ---- Actions ----
-	if imgui.CollapsingHeader("Actions", {.DefaultOpen}) {
-		btn_width := imgui.GetContentRegionAvail().x
-		if imgui.Button("Generate (Instant)", {btn_width, 0}) {
-			dungeon_generate_full(d)
-		}
-		if imgui.Button("Generate (Animated)", {btn_width, 0}) {
 			dungeon_start_generation(d)
-			state.gen_animated = true
 			state.gen_step_timer = 0
 		}
-		if imgui.Button("Step", {btn_width, 0}) {
-			if d.gen_done {
-				dungeon_start_generation(d)
-				state.gen_step_timer = 0
-			}
-			dungeon_generate_step(d)
-		}
-		if imgui.Button("Reset", {btn_width, 0}) {
-			dungeon_reset(d)
-			d.gen_done = true
-		}
+		dungeon_generate_step(d)
+	}
+	imgui.SameLine()
+	if imgui.Button("Reset", {half_width, 0}) {
+		dungeon_reset(d)
+		d.gen_done = true
 	}
 
-	// ---- Controls ----
-	if imgui.CollapsingHeader("Controls") {
-		imgui.TextColored({0.5, 0.5, 0.6, 1.0}, "[Tab]   Toggle camera")
-		imgui.TextColored({0.5, 0.5, 0.6, 1.0}, "[R]     Regenerate")
-		imgui.TextColored({0.5, 0.5, 0.6, 1.0}, "[Space] Step generation")
-		imgui.TextColored({0.5, 0.5, 0.6, 1.0}, "[H]     Toggle panel")
-		imgui.TextColored({0.5, 0.5, 0.6, 1.0}, "[G]     Toggle animated")
+	imgui.Separator()
+
+	// ---- Tabbed sections ----
+	if imgui.BeginTabBar("##main_tabs", {.FittingPolicyResizeDown}) {
+
+		// ---- Recipe tab ----
+		if imgui.BeginTabItem("Recipe") {
+			if imgui.BeginCombo("Preset", PRESET_NAMES[preset_selected]) {
+				for i in 0 ..< len(PRESET_NAMES) {
+					is_sel := i == preset_selected
+					if imgui.Selectable(PRESET_NAMES[i], is_sel) {
+						preset_selected = i
+						recipe_destroy(&d.recipe)
+						d.recipe = preset_recipe_by_index(preset_selected)
+					}
+					if is_sel do imgui.SetItemDefaultFocus()
+				}
+				imgui.EndCombo()
+			}
+
+			seed_int := c.int(d.recipe.seed)
+			if imgui.DragInt("Seed (0=rand)", &seed_int, 1.0, 0, 99999) {
+				d.recipe.seed = u64(seed_int)
+			}
+
+			imgui.Separator()
+			imgui.Text("Steps:")
+
+			remove_idx := -1
+			swap_idx := -1
+
+			for si in 0 ..< len(d.recipe.steps) {
+				step := &d.recipe.steps[si]
+				imgui.PushIDInt(c.int(si))
+
+				is_active := !d.gen_done && si == d.current_step
+				type_color := rl_color_to_vec4(STEP_TYPE_COLORS[step.type])
+				label := fmt.ctprintf("%d. %s", si + 1, STEP_TYPE_NAMES[step.type])
+
+				flags: imgui.TreeNodeFlags = {.OpenOnArrow, .SpanAvailWidth}
+				if is_active do flags |= {.Selected}
+
+				imgui.PushStyleColorImVec4(.Text, type_color)
+				is_open := imgui.TreeNodeEx(label, flags)
+				imgui.PopStyleColor()
+
+				imgui.SameLine(imgui.GetWindowWidth() - 75)
+				if si > 0 {
+					if imgui.SmallButton("^") do swap_idx = si - 1
+				} else {
+					imgui.SmallButton("^")
+				}
+				imgui.SameLine()
+				if si < len(d.recipe.steps) - 1 {
+					if imgui.SmallButton("v") do swap_idx = si
+				} else {
+					imgui.SmallButton("v")
+				}
+				imgui.SameLine()
+				if imgui.SmallButton("X") do remove_idx = si
+
+				if is_open {
+					ui_step_params(step)
+					imgui.TreePop()
+				}
+
+				imgui.PopID()
+			}
+
+			if swap_idx >= 0 && swap_idx < len(d.recipe.steps) - 1 {
+				d.recipe.steps[swap_idx], d.recipe.steps[swap_idx + 1] = d.recipe.steps[swap_idx + 1], d.recipe.steps[swap_idx]
+			}
+
+			if remove_idx >= 0 && len(d.recipe.steps) > 0 {
+				ordered_remove(&d.recipe.steps, remove_idx)
+			}
+
+			imgui.Spacing()
+
+			imgui.SetNextItemWidth(imgui.GetContentRegionAvail().x - 40)
+			if imgui.BeginCombo("##add_type", ADD_STEP_OPTIONS[add_step_type_selected]) {
+				for i in 0 ..< len(ADD_STEP_OPTIONS) {
+					is_sel := i == add_step_type_selected
+					if imgui.Selectable(ADD_STEP_OPTIONS[i], is_sel) {
+						add_step_type_selected = i
+					}
+					if is_sel do imgui.SetItemDefaultFocus()
+				}
+				imgui.EndCombo()
+			}
+			imgui.SameLine()
+			if imgui.Button("Add") {
+				new_step := make_step(ADD_STEP_TYPES[add_step_type_selected])
+				switch new_step.type {
+				case .Seed_Rooms:
+					new_step.seed_rooms = {count = 8}
+				case .Grow_Clusters:
+					new_step.grow_clusters = {chance = 0.4, min_rooms = 1, max_rooms = 4}
+				case .Connect_MST:
+					new_step.connect_mst = {manhattan_weight = 0.8}
+				case .Mark_Doors:
+				case .Add_Loops:
+					new_step.add_loops = {loop_chance = 0.3, max_extra = 4, manhattan_weight = 0.5}
+				case .Widen_Corridors:
+					new_step.widen_corridors = {width = 3}
+				case .BSP_Partition:
+					new_step.bsp_partition = {min_size = 8, padding = 2}
+				case .Fill_Dead_Ends:
+					new_step.fill_dead_ends = {iterations = 3}
+				case .Place_Grid:
+					new_step.place_grid = {cols = 3, rows = 3, jitter = 0.2}
+				case .Room_Corridor:
+					new_step.room_corridor = {strictness = 0.5, manhattan_weight = 0.8, max_chain = 6}
+				case .Define_Area:
+					new_step.define_area = {area_id = 0, shape = .Rectangle, x = 8, y = 8, w = 16, h = 16}
+				case .Pack_Rooms:
+					new_step.pack_rooms = {max_rooms = 0}
+				case .Join_Rooms:
+				case .Connect_Doors:
+					new_step.connect_doors = {mode = .Minimal, max_per_pair = 1}
+				case .Place_Specific:
+					new_step.place_specific = {template_index = 1, x = 30, y = 30, rotation = 0}
+				case .Mirror_Rooms:
+					new_step.mirror_rooms = {axis = .X, axis_pos = 0}
+				case .Place_Symmetric:
+					new_step.place_symmetric = {symmetry = .Mirror_X, axis_x = 0, axis_y = 0, max_rooms = 30}
+				case .Place_Perimeter:
+					new_step.place_perimeter = {gap_chance = 0.05, max_rooms = 0}
+				case .Place_Along_Line:
+					new_step.place_along_line = {x1 = 10, y1 = 32, x2 = 54, y2 = 32, door_side = 1, spacing = 0}
+				case .Fill_Area:
+					new_step.fill_area = {color_r = 120, color_g = 100, color_b = 70}
+				case .Wall_Border:
+					new_step.wall_border = {thickness = 2}
+				case .Connect_Linear:
+					new_step.connect_linear = {manhattan_weight = 0.8}
+				}
+				append(&d.recipe.steps, new_step)
+			}
+
+			imgui.EndTabItem()
+		}
+
+		// ---- Display tab ----
+		if imgui.BeginTabItem("Display") {
+			if imgui.BeginCombo("Grid Size", GRID_SIZE_OPTIONS[grid_size_selected]) {
+				for i in 0 ..< len(GRID_SIZE_OPTIONS) {
+					is_sel := i == grid_size_selected
+					if imgui.Selectable(GRID_SIZE_OPTIONS[i], is_sel) {
+						grid_size_selected = i
+						new_size := GRID_SIZE_VALUES[grid_size_selected]
+						if new_size != d.config.grid_width {
+							new_config := d.config
+							new_config.grid_width = new_size
+							new_config.grid_height = new_size
+							dungeon_destroy(d)
+							state.dungeon = dungeon_create(new_config)
+							d = &state.dungeon
+							d.recipe = preset_recipe_by_index(preset_selected)
+							state.topdown_camera = topdown_camera_create(d.config)
+							state.freeflight_cam = freeflight_camera_create(d.config)
+							dungeon_generate_full(d)
+						}
+					}
+					if is_sel do imgui.SetItemDefaultFocus()
+				}
+				imgui.EndCombo()
+			}
+
+			imgui.SliderFloat("Wall Height", &d.config.wall_height, 0.5, 4.0)
+			imgui.Checkbox("Show Ceilings", &show_ceilings)
+			imgui.Checkbox("Join Rooms", &join_rooms)
+			imgui.Separator()
+			imgui.SliderFloat("Anim Speed", &gen_step_interval, 0.01, 0.3, "%.2fs")
+			imgui.Checkbox("Animated Mode", &state.gen_animated)
+
+			imgui.EndTabItem()
+		}
+
+		// ---- Controls tab ----
+		if imgui.BeginTabItem("Keys") {
+			imgui.TextColored({0.5, 0.5, 0.6, 1.0}, "[Tab]   Toggle camera")
+			imgui.TextColored({0.5, 0.5, 0.6, 1.0}, "[R]     Regenerate")
+			imgui.TextColored({0.5, 0.5, 0.6, 1.0}, "[Space] Step generation")
+			imgui.TextColored({0.5, 0.5, 0.6, 1.0}, "[H]     Toggle panel")
+			imgui.TextColored({0.5, 0.5, 0.6, 1.0}, "[G]     Toggle animated")
+
+			imgui.EndTabItem()
+		}
+
+		imgui.EndTabBar()
 	}
 }
 
