@@ -47,7 +47,15 @@ main :: proc() {
 	rl.SetTargetFPS(60)
 
 	// Load custom font (Arial) - must be after InitWindow
-	ui_font = rl.LoadFontEx("/System/Library/Fonts/Supplemental/Arial.ttf", 32, nil, 0)
+	// Platform-specific font path
+	when ODIN_OS == .Windows {
+		FONT_PATH :: "C:\\Windows\\Fonts\\arial.ttf"
+	} else when ODIN_OS == .Darwin {
+		FONT_PATH :: "/System/Library/Fonts/Supplemental/Arial.ttf"
+	} else {
+		FONT_PATH :: "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf"
+	}
+	ui_font = rl.LoadFontEx(FONT_PATH, 32, nil, 0)
 	if ui_font.texture.id > 0 {
 		ui_font_loaded = true
 		rl.SetTextureFilter(ui_font.texture, .BILINEAR)
