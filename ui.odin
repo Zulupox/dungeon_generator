@@ -2,624 +2,44 @@ package dungeon_generator
 
 import rl "vendor:raylib"
 import "core:fmt"
-import "core:math"
+import "core:c"
+
+import imgui "libs/odin-imgui"
 
 // ---------------------------------------------------------------------------
-// Side panel UI
+// Side panel constants
 // ---------------------------------------------------------------------------
 
 PANEL_WIDTH :: 280
 
-// Colors
-UI_BG           :: rl.Color{35, 35, 42, 245}
-UI_HEADER_BG    :: rl.Color{45, 45, 55, 255}
-UI_WIDGET_BG    :: rl.Color{55, 55, 65, 255}
-UI_WIDGET_HOVER :: rl.Color{70, 70, 85, 255}
-UI_WIDGET_ACTIVE:: rl.Color{85, 85, 105, 255}
-UI_ACCENT       :: rl.Color{100, 160, 255, 255}
-UI_ACCENT_HOVER :: rl.Color{130, 180, 255, 255}
-UI_TEXT          :: rl.Color{220, 220, 230, 255}
-UI_TEXT_DIM      :: rl.Color{140, 140, 155, 255}
-UI_SEPARATOR    :: rl.Color{60, 60, 72, 255}
-UI_STEP_BG      :: rl.Color{42, 42, 52, 255}
-UI_STEP_ACTIVE  :: rl.Color{50, 55, 70, 255}
-UI_REMOVE_BG    :: rl.Color{120, 50, 50, 255}
-UI_REMOVE_HOVER :: rl.Color{160, 60, 60, 255}
-
-// Step type colors for visual distinction
-STEP_TYPE_COLORS := [Step_Type]rl.Color{
-	.Seed_Rooms      = rl.Color{100, 200, 120, 255},
-	.Grow_Clusters   = rl.Color{200, 180, 80, 255},
-	.Connect_MST     = rl.Color{100, 160, 255, 255},
-	.Mark_Doors      = rl.Color{200, 130, 200, 255},
-	.Add_Loops       = rl.Color{120, 200, 255, 255},
-	.Widen_Corridors = rl.Color{255, 160, 80, 255},
-	.BSP_Partition   = rl.Color{80, 220, 180, 255},
-	.Fill_Dead_Ends  = rl.Color{220, 100, 100, 255},
-	.Place_Grid      = rl.Color{180, 220, 100, 255},
-	.Room_Corridor   = rl.Color{255, 200, 150, 255},
-	.Define_Area     = rl.Color{200, 200, 255, 255},
-	.Pack_Rooms      = rl.Color{160, 255, 180, 255},
-	.Join_Rooms      = rl.Color{255, 220, 180, 255},
-	.Connect_Doors   = rl.Color{255, 180, 220, 255},
-	.Place_Specific  = rl.Color{255, 140, 100, 255},
-	.Mirror_Rooms    = rl.Color{200, 160, 255, 255},
-	.Place_Symmetric = rl.Color{180, 255, 220, 255},
-	.Place_Perimeter  = rl.Color{255, 200, 100, 255},
-	.Place_Along_Line = rl.Color{100, 220, 180, 255},
-	.Fill_Area        = rl.Color{180, 160, 120, 255},
-	.Wall_Border      = rl.Color{140, 130, 110, 255},
-	.Connect_Linear   = rl.Color{120, 180, 255, 255},
+// Check if mouse is over the side panel (kept for camera.odin compatibility)
+ui_mouse_on_panel :: proc() -> bool {
+	return rl.GetMouseX() < PANEL_WIDTH
 }
-
-// ---------------------------------------------------------------------------
-// Font-aware text helpers (use custom font when loaded, fallback to default)
-// ---------------------------------------------------------------------------
-
-draw_text :: proc(text: cstring, x, y: i32, size: i32, color: rl.Color) {
-	if ui_font_loaded {
-		rl.DrawTextEx(ui_font, text, {f32(x), f32(y)}, f32(size), 1, color)
-	} else {
-		rl.DrawText(text, x, y, size, color)
-	}
-}
-
-measure_text :: proc(text: cstring, size: i32) -> i32 {
-	if ui_font_loaded {
-		v := rl.MeasureTextEx(ui_font, text, f32(size), 1)
-		return i32(v.x)
-	}
-	return rl.MeasureText(text, size)
-}
-
-// UI layout state (reset each frame)
-UI_Layout :: struct {
-	x:       i32, // left edge of content area
-	y:       i32, // current y cursor
-	w:       i32, // content width
-	padding: i32,
-	spacing: i32,
-	mouse_on_panel: bool, // true if mouse is over the panel
-}
-
-ui_layout: UI_Layout
-
-// Active dropdown tracking (only one can be open at a time)
-active_dropdown: cstring  // label of currently open dropdown, nil if none
-dropdown_scroll: i32      // scroll offset for open dropdown
 
 // Recipe editor state
 preset_selected: int = 0
 add_step_type_selected: int = 0
-expanded_steps: [32]bool   // which steps are expanded (up to 32 steps)
-
-// Step list scroll state
-step_list_scroll: i32 = 0      // scroll offset in pixels
-step_list_content_h: i32 = 0   // total content height of the step list
-
-// Check if mouse is over the side panel
-ui_mouse_on_panel :: proc() -> bool {
-	mx := rl.GetMouseX()
-	return mx < PANEL_WIDTH
-}
 
 // ---------------------------------------------------------------------------
-// Widget primitives
+// Helpers
 // ---------------------------------------------------------------------------
 
-// Section header
-ui_section :: proc(label: cstring) {
-	l := &ui_layout
-	l.y += l.spacing
-	rl.DrawRectangle(0, l.y, PANEL_WIDTH, 24, UI_HEADER_BG)
-	draw_text(label, l.x, l.y + 4, 14, UI_ACCENT)
-	l.y += 24 + l.spacing
+rl_color_to_vec4 :: proc(col: rl.Color) -> imgui.Vec4 {
+	return {f32(col.r) / 255.0, f32(col.g) / 255.0, f32(col.b) / 255.0, f32(col.a) / 255.0}
 }
 
-// Separator line
-ui_separator :: proc() {
-	l := &ui_layout
-	l.y += l.spacing / 2
-	rl.DrawLine(l.x, l.y, l.x + l.w, l.y, UI_SEPARATOR)
-	l.y += l.spacing / 2
-}
-
-ui_spacer :: proc(amount: i32 = 4) {
-	ui_layout.y += amount
-}
-
-// Label
-ui_label :: proc(text: cstring, color: rl.Color = UI_TEXT) {
-	l := &ui_layout
-	draw_text(text, l.x, l.y, 14, color)
-	l.y += 18
-}
-
-// Label with value on the right side
-ui_label_value :: proc(label: cstring, value: cstring, value_color: rl.Color = UI_ACCENT) {
-	l := &ui_layout
-	draw_text(label, l.x, l.y, 14, UI_TEXT_DIM)
-	val_width := measure_text(value, 14)
-	draw_text(value, l.x + l.w - val_width, l.y, 14, value_color)
-	l.y += 18
-}
-
-// Button - returns true if clicked
-ui_button :: proc(label: cstring, accent: bool = false) -> bool {
-	l := &ui_layout
-	btn_h: i32 = 28
-	rect := rl.Rectangle{f32(l.x), f32(l.y), f32(l.w), f32(btn_h)}
-
-	mouse := rl.GetMousePosition()
-	hovered := rl.CheckCollisionPointRec(mouse, rect) && active_dropdown == nil
-	pressed := hovered && rl.IsMouseButtonPressed(.LEFT)
-
-	bg: rl.Color
-	if accent {
-		bg = pressed ? UI_WIDGET_ACTIVE : (hovered ? UI_ACCENT_HOVER : UI_ACCENT)
-	} else {
-		bg = pressed ? UI_WIDGET_ACTIVE : (hovered ? UI_WIDGET_HOVER : UI_WIDGET_BG)
+// DragInt wrapper: bridges Odin int <-> imgui c.int, with clamping.
+ui_drag_int :: proc(label: cstring, v: ^int, min_val, max_val: int) -> bool {
+	tmp := c.int(v^)
+	if imgui.DragInt(label, &tmp, 1.0, c.int(min_val), c.int(max_val)) {
+		v^ = int(tmp)
+		return true
 	}
-	rl.DrawRectangleRec(rect, bg)
-
-	text_color: rl.Color = accent ? rl.Color{20, 20, 25, 255} : UI_TEXT
-	tw := measure_text(label, 14)
-	draw_text(label, l.x + (l.w - tw) / 2, l.y + 7, 14, text_color)
-
-	l.y += btn_h + l.spacing
-
-	return pressed
+	return false
 }
 
-// Small inline button - returns true if clicked
-ui_small_button :: proc(x, y, w, h: i32, label: cstring, bg_color, hover_color: rl.Color) -> bool {
-	rect := rl.Rectangle{f32(x), f32(y), f32(w), f32(h)}
-	mouse := rl.GetMousePosition()
-	hovered := rl.CheckCollisionPointRec(mouse, rect) && active_dropdown == nil
-	pressed := hovered && rl.IsMouseButtonPressed(.LEFT)
-
-	rl.DrawRectangleRec(rect, hovered ? hover_color : bg_color)
-	tw := measure_text(label, 12)
-	draw_text(label, x + (w - tw) / 2, y + (h - 12) / 2, 12, UI_TEXT)
-
-	return pressed
-}
-
-// Integer stepper: [label]  [-] value [+]
-ui_int_stepper :: proc(label: cstring, value: ^int, min_val, max_val, step: int) -> bool {
-	l := &ui_layout
-	row_h: i32 = 26
-	btn_w: i32 = 28
-	changed := false
-
-	// Label
-	draw_text(label, l.x, l.y + 5, 14, UI_TEXT_DIM)
-
-	// Value display + buttons on right side
-	right_x := l.x + l.w
-	mouse := rl.GetMousePosition()
-
-	// [+] button
-	plus_rect := rl.Rectangle{f32(right_x - btn_w), f32(l.y), f32(btn_w), f32(row_h)}
-	plus_hovered := rl.CheckCollisionPointRec(mouse, plus_rect) && active_dropdown == nil
-	rl.DrawRectangleRec(plus_rect, plus_hovered ? UI_WIDGET_HOVER : UI_WIDGET_BG)
-	draw_text("+", right_x - btn_w + 9, l.y + 6, 14, UI_TEXT)
-	if plus_hovered && rl.IsMouseButtonPressed(.LEFT) {
-		value^ = min(max_val, value^ + step)
-		changed = true
-	}
-
-	// Value text
-	val_text := fmt.ctprintf("%d", value^)
-	val_w := measure_text(val_text, 14)
-	val_x := right_x - btn_w - 8 - val_w
-	draw_text(val_text, val_x, l.y + 6, 14, UI_TEXT)
-
-	// [-] button
-	minus_rect := rl.Rectangle{f32(val_x - 8 - btn_w), f32(l.y), f32(btn_w), f32(row_h)}
-	minus_hovered := rl.CheckCollisionPointRec(mouse, minus_rect) && active_dropdown == nil
-	rl.DrawRectangleRec(minus_rect, minus_hovered ? UI_WIDGET_HOVER : UI_WIDGET_BG)
-	draw_text("-", val_x - 8 - btn_w + 10, l.y + 6, 14, UI_TEXT)
-	if minus_hovered && rl.IsMouseButtonPressed(.LEFT) {
-		value^ = max(min_val, value^ - step)
-		changed = true
-	}
-
-	l.y += row_h + l.spacing
-
-	return changed
-}
-
-// Integer stepper with a custom text label instead of the raw number: [label]  [-] text [+]
-ui_labeled_stepper :: proc(label: cstring, value: ^int, min_val, max_val, step: int, display_text: cstring) -> bool {
-	l := &ui_layout
-	row_h: i32 = 26
-	btn_w: i32 = 28
-	changed := false
-
-	// Label
-	draw_text(label, l.x, l.y + 5, 14, UI_TEXT_DIM)
-
-	// Value display + buttons on right side
-	right_x := l.x + l.w
-	mouse := rl.GetMousePosition()
-
-	// [+] button
-	plus_rect := rl.Rectangle{f32(right_x - btn_w), f32(l.y), f32(btn_w), f32(row_h)}
-	plus_hovered := rl.CheckCollisionPointRec(mouse, plus_rect) && active_dropdown == nil
-	rl.DrawRectangleRec(plus_rect, plus_hovered ? UI_WIDGET_HOVER : UI_WIDGET_BG)
-	draw_text("+", right_x - btn_w + 9, l.y + 6, 14, UI_TEXT)
-	if plus_hovered && rl.IsMouseButtonPressed(.LEFT) {
-		value^ = min(max_val, value^ + step)
-		changed = true
-	}
-
-	// Display text (custom label instead of number)
-	val_w := measure_text(display_text, 14)
-	val_x := right_x - btn_w - 8 - val_w
-	draw_text(display_text, val_x, l.y + 6, 14, UI_TEXT)
-
-	// [-] button
-	minus_rect := rl.Rectangle{f32(val_x - 8 - btn_w), f32(l.y), f32(btn_w), f32(row_h)}
-	minus_hovered := rl.CheckCollisionPointRec(mouse, minus_rect) && active_dropdown == nil
-	rl.DrawRectangleRec(minus_rect, minus_hovered ? UI_WIDGET_HOVER : UI_WIDGET_BG)
-	draw_text("-", val_x - 8 - btn_w + 10, l.y + 6, 14, UI_TEXT)
-	if minus_hovered && rl.IsMouseButtonPressed(.LEFT) {
-		value^ = max(min_val, value^ - step)
-		changed = true
-	}
-
-	l.y += row_h + l.spacing
-
-	return changed
-}
-
-// Float slider
-ui_slider :: proc(label: cstring, value: ^f32, min_val, max_val: f32, fmt_str: string = "%.1f") -> bool {
-	l := &ui_layout
-	row_h: i32 = 16
-	slider_h: i32 = 12
-	changed := false
-
-	// Label + value
-	val_text := fmt.ctprintf(fmt_str, value^)
-	draw_text(label, l.x, l.y, 14, UI_TEXT_DIM)
-	val_w := measure_text(val_text, 14)
-	draw_text(val_text, l.x + l.w - val_w, l.y, 14, UI_TEXT)
-	l.y += row_h + 2
-
-	// Slider track
-	track_rect := rl.Rectangle{f32(l.x), f32(l.y), f32(l.w), f32(slider_h)}
-	rl.DrawRectangleRec(track_rect, UI_WIDGET_BG)
-
-	// Slider fill
-	t := (value^ - min_val) / (max_val - min_val)
-	fill_w := f32(l.w) * t
-	rl.DrawRectangle(l.x, l.y, i32(fill_w), slider_h, UI_ACCENT)
-
-	// Handle
-	handle_x := f32(l.x) + fill_w
-	rl.DrawCircle(i32(handle_x), l.y + slider_h / 2, 7, UI_ACCENT_HOVER)
-
-	// Interaction
-	mouse := rl.GetMousePosition()
-	if rl.CheckCollisionPointRec(mouse, track_rect) && active_dropdown == nil {
-		if rl.IsMouseButtonDown(.LEFT) {
-			new_t := clamp((mouse.x - f32(l.x)) / f32(l.w), 0, 1)
-			value^ = min_val + new_t * (max_val - min_val)
-			changed = true
-		}
-	}
-
-	l.y += slider_h + l.spacing + 2
-
-	return changed
-}
-
-// Toggle / checkbox
-ui_toggle :: proc(label: cstring, value: ^bool) -> bool {
-	l := &ui_layout
-	row_h: i32 = 24
-	box_size: i32 = 18
-	changed := false
-
-	rect := rl.Rectangle{f32(l.x), f32(l.y), f32(l.w), f32(row_h)}
-	mouse := rl.GetMousePosition()
-	hovered := rl.CheckCollisionPointRec(mouse, rect) && active_dropdown == nil
-
-	// Checkbox
-	box_y := l.y + (row_h - box_size) / 2
-	rl.DrawRectangle(l.x, box_y, box_size, box_size, hovered ? UI_WIDGET_HOVER : UI_WIDGET_BG)
-	if value^ {
-		rl.DrawRectangle(l.x + 3, box_y + 3, box_size - 6, box_size - 6, UI_ACCENT)
-	}
-
-	// Label
-	draw_text(label, l.x + box_size + 8, l.y + 5, 14, UI_TEXT)
-
-	if hovered && rl.IsMouseButtonPressed(.LEFT) {
-		value^ = !value^
-		changed = true
-	}
-
-	l.y += row_h + l.spacing
-
-	return changed
-}
-
-// Dropdown - returns true if selection changed
-// Supports scrolling when there are more options than max_visible.
-ui_dropdown :: proc(label: cstring, options: []cstring, selected: ^int) -> bool {
-	l := &ui_layout
-	row_h: i32 = 26
-	changed := false
-	mouse := rl.GetMousePosition()
-	is_open := active_dropdown == label
-
-	// Label
-	draw_text(label, l.x, l.y, 14, UI_TEXT_DIM)
-	l.y += 16
-
-	// Dropdown button
-	btn_rect := rl.Rectangle{f32(l.x), f32(l.y), f32(l.w), f32(row_h)}
-	btn_hovered := rl.CheckCollisionPointRec(mouse, btn_rect)
-	rl.DrawRectangleRec(btn_rect, btn_hovered && !is_open ? UI_WIDGET_HOVER : UI_WIDGET_BG)
-
-	// Current value text
-	current_text: cstring = selected^ >= 0 && selected^ < len(options) ? options[selected^] : "---"
-	draw_text(current_text, l.x + 8, l.y + 6, 14, UI_TEXT)
-
-	// Arrow
-	arrow: cstring = is_open ? "^" : "v"
-	draw_text(arrow, l.x + l.w - 18, l.y + 6, 14, UI_TEXT_DIM)
-
-	// Toggle open/close
-	if btn_hovered && rl.IsMouseButtonPressed(.LEFT) {
-		if is_open {
-			active_dropdown = nil
-		} else {
-			active_dropdown = label
-			// Reset scroll, try to keep selected item visible
-			max_visible: i32 = 10
-			opt_count := i32(len(options))
-			if opt_count <= max_visible {
-				dropdown_scroll = 0
-			} else {
-				// Center the selected item in the visible window
-				dropdown_scroll = clamp(i32(selected^) - max_visible / 2, 0, opt_count - max_visible)
-			}
-		}
-	}
-
-	l.y += row_h
-
-	// Draw dropdown options if open
-	if is_open {
-		opt_count := i32(len(options))
-		max_visible: i32 = 10
-		visible := min(opt_count, max_visible)
-		can_scroll := opt_count > max_visible
-		max_scroll := opt_count - max_visible
-
-		list_h := visible * row_h
-
-		// Background
-		list_rect := rl.Rectangle{f32(l.x), f32(l.y), f32(l.w), f32(list_h)}
-		rl.DrawRectangleRec(list_rect, rl.Color{45, 45, 55, 250})
-
-		// Mouse wheel scrolling when hovering the list
-		if can_scroll && rl.CheckCollisionPointRec(mouse, list_rect) {
-			wheel := rl.GetMouseWheelMove()
-			if wheel != 0 {
-				dropdown_scroll = clamp(dropdown_scroll - i32(wheel), 0, max_scroll)
-			}
-		}
-
-		// Draw visible items (offset by scroll)
-		for vi in 0 ..< visible {
-			item_idx := vi + dropdown_scroll
-			opt_y := l.y + vi * row_h
-			opt_rect := rl.Rectangle{f32(l.x), f32(opt_y), f32(l.w), f32(row_h)}
-			opt_hovered := rl.CheckCollisionPointRec(mouse, opt_rect)
-
-			if i32(selected^) == item_idx {
-				rl.DrawRectangleRec(opt_rect, UI_ACCENT)
-				draw_text(options[item_idx], l.x + 8, opt_y + 6, 14, rl.Color{20, 20, 25, 255})
-			} else {
-				if opt_hovered {
-					rl.DrawRectangleRec(opt_rect, UI_WIDGET_HOVER)
-				}
-				draw_text(options[item_idx], l.x + 8, opt_y + 6, 14, UI_TEXT)
-			}
-
-			if opt_hovered && rl.IsMouseButtonPressed(.LEFT) {
-				selected^ = int(item_idx)
-				active_dropdown = nil
-				changed = true
-			}
-		}
-
-		// Scroll indicators
-		if can_scroll {
-			indicator_color := rl.Color{180, 180, 200, 180}
-			if dropdown_scroll > 0 {
-				// Up arrow at top-right of list
-				draw_text("^", l.x + l.w - 16, l.y + 2, 12, indicator_color)
-			}
-			if dropdown_scroll < max_scroll {
-				// Down arrow at bottom-right of list
-				draw_text("v", l.x + l.w - 16, l.y + list_h - 14, 12, indicator_color)
-			}
-		}
-
-		l.y += list_h
-	}
-
-	l.y += l.spacing
-
-	return changed
-}
-
-// ---------------------------------------------------------------------------
-// Recipe step editor - draws controls for a single step's parameters
-// ---------------------------------------------------------------------------
-
-ui_step_params :: proc(step: ^Gen_Step) {
-	l := &ui_layout
-	// Indent step params
-	old_x := l.x
-	old_w := l.w
-	l.x += 12
-	l.w -= 12
-
-	switch step.type {
-	case .Seed_Rooms:
-		ui_int_stepper("Count", &step.seed_rooms.count, 1, 50, 1)
-	case .Grow_Clusters:
-		ui_slider("Chance", &step.grow_clusters.chance, 0.0, 1.0)
-		ui_int_stepper("Min Rooms", &step.grow_clusters.min_rooms, 0, 20, 1)
-		ui_int_stepper("Max Rooms", &step.grow_clusters.max_rooms, 0, 20, 1)
-	case .Connect_MST:
-		ui_slider("Manhattan", &step.connect_mst.manhattan_weight, 0.0, 1.0)
-	case .Mark_Doors:
-		ui_label("(no parameters)", UI_TEXT_DIM)
-	case .Add_Loops:
-		ui_slider("Loop Chance", &step.add_loops.loop_chance, 0.0, 1.0)
-		ui_int_stepper("Max Extra", &step.add_loops.max_extra, 1, 20, 1)
-		ui_slider("Manhattan", &step.add_loops.manhattan_weight, 0.0, 1.0)
-	case .Widen_Corridors:
-		ui_int_stepper("Width", &step.widen_corridors.width, 2, 5, 1)
-	case .BSP_Partition:
-		ui_int_stepper("Min Size", &step.bsp_partition.min_size, 4, 32, 1)
-		ui_int_stepper("Padding", &step.bsp_partition.padding, 1, 8, 1)
-	case .Fill_Dead_Ends:
-		ui_int_stepper("Iterations", &step.fill_dead_ends.iterations, 1, 20, 1)
-	case .Place_Grid:
-		ui_int_stepper("Columns", &step.place_grid.cols, 1, 10, 1)
-		ui_int_stepper("Rows", &step.place_grid.rows, 1, 10, 1)
-		ui_slider("Jitter", &step.place_grid.jitter, 0.0, 1.0)
-	case .Room_Corridor:
-		ui_slider("Strictness", &step.room_corridor.strictness, 0.0, 1.0)
-		ui_slider("Manhattan", &step.room_corridor.manhattan_weight, 0.0, 1.0)
-		ui_int_stepper("Max Chain", &step.room_corridor.max_chain, 1, 20, 1)
-	case .Define_Area:
-		ui_int_stepper("Area ID", &step.define_area.area_id, 0, 9, 1)
-		// Shape toggle (Rectangle / Circle)
-		shape_val := int(step.define_area.shape)
-		ui_int_stepper("Shape", &shape_val, 0, 1, 1)
-		step.define_area.shape = Area_Shape(shape_val)
-		ui_int_stepper("X", &step.define_area.x, 0, 128, 1)
-		ui_int_stepper("Y", &step.define_area.y, 0, 128, 1)
-		ui_int_stepper("W", &step.define_area.w, 1, 128, 1)
-		ui_int_stepper("H", &step.define_area.h, 1, 128, 1)
-	case .Pack_Rooms:
-		ui_int_stepper("Max Rooms", &step.pack_rooms.max_rooms, 0, 200, 5)
-	case .Join_Rooms:
-		ui_label("(no parameters)", UI_TEXT_DIM)
-	case .Connect_Doors:
-		// Mode toggle (All / Minimal) - display text labels
-		mode_val := int(step.connect_doors.mode)
-		ui_labeled_stepper("Mode", &mode_val, 0, 1, 1, CONNECT_DOORS_MODE_NAMES[step.connect_doors.mode])
-		step.connect_doors.mode = Connect_Doors_Mode(mode_val)
-		// Max/Pair - show "No limit" when 0
-		max_label: cstring = step.connect_doors.max_per_pair == 0 ? "No limit" : fmt.ctprintf("%d", step.connect_doors.max_per_pair)
-		ui_labeled_stepper("Max/Pair", &step.connect_doors.max_per_pair, 0, 10, 1, max_label)
-	case .Place_Specific:
-		tmpl_idx := clamp(step.place_specific.template_index, 0, len(MODULE_TEMPLATES) - 1)
-		tmpl_name: cstring
-		switch tmpl_idx {
-		case 0: tmpl_name = "Small Room"
-		case 1: tmpl_name = "Large Room"
-		case 2: tmpl_name = "Long Hall"
-		case 3: tmpl_name = "L-Shape"
-		case 4: tmpl_name = "Cross"
-		case 5: tmpl_name = "Grand Hall"
-		case 6: tmpl_name = "Throne Room"
-		case:   tmpl_name = "Unknown"
-		}
-		ui_labeled_stepper("Template", &step.place_specific.template_index, 0, len(MODULE_TEMPLATES) - 1, 1, tmpl_name)
-		ui_int_stepper("X", &step.place_specific.x, 0, 128, 1)
-		ui_int_stepper("Y", &step.place_specific.y, 0, 128, 1)
-		rot_idx := clamp(step.place_specific.rotation, 0, 3)
-		rot_name: cstring
-		switch rot_idx {
-		case 0: rot_name = "0 deg"
-		case 1: rot_name = "90 deg"
-		case 2: rot_name = "180 deg"
-		case 3: rot_name = "270 deg"
-		case:   rot_name = "?"
-		}
-		ui_labeled_stepper("Rotation", &step.place_specific.rotation, 0, 3, 1, rot_name)
-	case .Mirror_Rooms:
-		axis_val := int(step.mirror_rooms.axis)
-		ui_labeled_stepper("Axis", &axis_val, 0, 1, 1, MIRROR_AXIS_NAMES[step.mirror_rooms.axis])
-		step.mirror_rooms.axis = Mirror_Axis(axis_val)
-		axis_label: cstring = step.mirror_rooms.axis_pos == 0 ? "Area center" : fmt.ctprintf("%d", step.mirror_rooms.axis_pos)
-		ui_labeled_stepper("Axis Pos", &step.mirror_rooms.axis_pos, 0, 128, 1, axis_label)
-	case .Place_Symmetric:
-		sym_val := int(step.place_symmetric.symmetry)
-		ui_labeled_stepper("Symmetry", &sym_val, 0, 3, 1, SYMMETRY_MODE_NAMES[step.place_symmetric.symmetry])
-		step.place_symmetric.symmetry = Symmetry_Mode(sym_val)
-		ax_label: cstring = step.place_symmetric.axis_x == 0 ? "Area ctr" : fmt.ctprintf("%d", step.place_symmetric.axis_x)
-		ui_labeled_stepper("Axis X", &step.place_symmetric.axis_x, 0, 128, 1, ax_label)
-		ay_label: cstring = step.place_symmetric.axis_y == 0 ? "Area ctr" : fmt.ctprintf("%d", step.place_symmetric.axis_y)
-		ui_labeled_stepper("Axis Y", &step.place_symmetric.axis_y, 0, 128, 1, ay_label)
-		max_label: cstring = step.place_symmetric.max_rooms == 0 ? "No limit" : fmt.ctprintf("%d", step.place_symmetric.max_rooms)
-		ui_labeled_stepper("Max Rooms", &step.place_symmetric.max_rooms, 0, 200, 5, max_label)
-	case .Place_Perimeter:
-		ui_slider("Gap Chance", &step.place_perimeter.gap_chance, 0.0, 0.5)
-		pmax_label: cstring = step.place_perimeter.max_rooms == 0 ? "No limit" : fmt.ctprintf("%d", step.place_perimeter.max_rooms)
-		ui_labeled_stepper("Max Rooms", &step.place_perimeter.max_rooms, 0, 200, 5, pmax_label)
-	case .Place_Along_Line:
-		ui_int_stepper("X1", &step.place_along_line.x1, 0, 128, 1)
-		ui_int_stepper("Y1", &step.place_along_line.y1, 0, 128, 1)
-		ui_int_stepper("X2", &step.place_along_line.x2, 0, 128, 1)
-		ui_int_stepper("Y2", &step.place_along_line.y2, 0, 128, 1)
-		side_name: cstring
-		switch step.place_along_line.door_side {
-		case 0: side_name = "Left"
-		case 1: side_name = "Right"
-		case:   side_name = "Both"
-		}
-		ui_labeled_stepper("Door Side", &step.place_along_line.door_side, 0, 2, 1, side_name)
-		ui_int_stepper("Spacing", &step.place_along_line.spacing, 0, 10, 1)
-	case .Fill_Area:
-		ui_int_stepper("Red", &step.fill_area.color_r, 0, 255, 10)
-		ui_int_stepper("Green", &step.fill_area.color_g, 0, 255, 10)
-		ui_int_stepper("Blue", &step.fill_area.color_b, 0, 255, 10)
-	case .Wall_Border:
-		ui_int_stepper("Thickness", &step.wall_border.thickness, 1, 5, 1)
-	case .Connect_Linear:
-		ui_slider("Manhattan", &step.connect_linear.manhattan_weight, 0.0, 1.0)
-	}
-
-	// Area constraint controls (for all steps except Define_Area)
-	if step.type != .Define_Area {
-		ui_spacer(2)
-		// area_id: -1 = none, 0..9 = constrain to area
-		ui_int_stepper("Area", &step.area_id, -1, 9, 1)
-		if step.area_id >= 0 {
-			// Show exclude toggle only when an area is selected
-			exclude_val := int(step.area_exclude)
-			ui_int_stepper("Exclude", &exclude_val, 0, 1, 1)
-			step.area_exclude = exclude_val != 0
-		}
-	}
-
-	l.x = old_x
-	l.w = old_w
-}
-
-// ---------------------------------------------------------------------------
-// Main draw_ui - builds the side panel
-// ---------------------------------------------------------------------------
-
-// Grid size options for dropdown
-GRID_SIZE_OPTIONS  := [?]cstring{"32 x 32", "48 x 48", "64 x 64", "96 x 96", "128 x 128"}
-GRID_SIZE_VALUES   := [?]int{32, 48, 64, 96, 128}
-grid_size_selected: int = 2 // default 64x64
-
-// Step type options for the "Add Step" dropdown
+// Step type options (parallel arrays for the "Add Step" combo)
 ADD_STEP_OPTIONS := [?]cstring{
 	"Seed Rooms", "Grow Clusters", "Connect MST", "Mark Doors",
 	"Add Loops", "Widen Corridors", "BSP Partition", "Fill Dead Ends",
@@ -637,459 +57,395 @@ ADD_STEP_TYPES := [?]Step_Type{
 	.Fill_Area, .Wall_Border, .Connect_Linear,
 }
 
+// Grid size options
+GRID_SIZE_OPTIONS  := [?]cstring{"32 x 32", "48 x 48", "64 x 64", "96 x 96", "128 x 128"}
+GRID_SIZE_VALUES   := [?]int{32, 48, 64, 96, 128}
+grid_size_selected: int = 2
+
+// Step type colors for visual distinction
+STEP_TYPE_COLORS := [Step_Type]rl.Color{
+	.Seed_Rooms      = {100, 200, 120, 255},
+	.Grow_Clusters   = {200, 180, 80, 255},
+	.Connect_MST     = {100, 160, 255, 255},
+	.Mark_Doors      = {200, 130, 200, 255},
+	.Add_Loops       = {120, 200, 255, 255},
+	.Widen_Corridors = {255, 160, 80, 255},
+	.BSP_Partition   = {80, 220, 180, 255},
+	.Fill_Dead_Ends  = {220, 100, 100, 255},
+	.Place_Grid      = {180, 220, 100, 255},
+	.Room_Corridor   = {255, 200, 150, 255},
+	.Define_Area     = {200, 200, 255, 255},
+	.Pack_Rooms      = {160, 255, 180, 255},
+	.Join_Rooms      = {255, 220, 180, 255},
+	.Connect_Doors   = {255, 180, 220, 255},
+	.Place_Specific  = {255, 140, 100, 255},
+	.Mirror_Rooms    = {200, 160, 255, 255},
+	.Place_Symmetric = {180, 255, 220, 255},
+	.Place_Perimeter  = {255, 200, 100, 255},
+	.Place_Along_Line = {100, 220, 180, 255},
+	.Fill_Area        = {180, 160, 120, 255},
+	.Wall_Border      = {140, 130, 110, 255},
+	.Connect_Linear   = {120, 180, 255, 255},
+}
+
+// ---------------------------------------------------------------------------
+// Step parameters editor
+// ---------------------------------------------------------------------------
+
+ui_step_params :: proc(step: ^Gen_Step) {
+	switch step.type {
+	case .Seed_Rooms:
+		ui_drag_int("Count", &step.seed_rooms.count, 1, 50)
+	case .Grow_Clusters:
+		imgui.SliderFloat("Chance", &step.grow_clusters.chance, 0.0, 1.0)
+		ui_drag_int("Min Rooms", &step.grow_clusters.min_rooms, 0, 20)
+		ui_drag_int("Max Rooms", &step.grow_clusters.max_rooms, 0, 20)
+	case .Connect_MST:
+		imgui.SliderFloat("Manhattan", &step.connect_mst.manhattan_weight, 0.0, 1.0)
+	case .Mark_Doors:
+		imgui.TextColored({0.5, 0.5, 0.6, 1.0}, "(no parameters)")
+	case .Add_Loops:
+		imgui.SliderFloat("Loop Chance", &step.add_loops.loop_chance, 0.0, 1.0)
+		ui_drag_int("Max Extra", &step.add_loops.max_extra, 1, 20)
+		imgui.SliderFloat("Manhattan", &step.add_loops.manhattan_weight, 0.0, 1.0)
+	case .Widen_Corridors:
+		ui_drag_int("Width", &step.widen_corridors.width, 2, 5)
+	case .BSP_Partition:
+		ui_drag_int("Min Size", &step.bsp_partition.min_size, 4, 32)
+		ui_drag_int("Padding", &step.bsp_partition.padding, 1, 8)
+	case .Fill_Dead_Ends:
+		ui_drag_int("Iterations", &step.fill_dead_ends.iterations, 1, 20)
+	case .Place_Grid:
+		ui_drag_int("Columns", &step.place_grid.cols, 1, 10)
+		ui_drag_int("Rows", &step.place_grid.rows, 1, 10)
+		imgui.SliderFloat("Jitter", &step.place_grid.jitter, 0.0, 1.0)
+	case .Room_Corridor:
+		imgui.SliderFloat("Strictness", &step.room_corridor.strictness, 0.0, 1.0)
+		imgui.SliderFloat("Manhattan", &step.room_corridor.manhattan_weight, 0.0, 1.0)
+		ui_drag_int("Max Chain", &step.room_corridor.max_chain, 1, 20)
+	case .Define_Area:
+		ui_drag_int("Area ID", &step.define_area.area_id, 0, 9)
+		shape_val := c.int(step.define_area.shape)
+		if imgui.Combo("Shape", &shape_val, "Rectangle\x00Circle\x00\x00") {
+			step.define_area.shape = Area_Shape(shape_val)
+		}
+		ui_drag_int("X", &step.define_area.x, 0, 128)
+		ui_drag_int("Y", &step.define_area.y, 0, 128)
+		ui_drag_int("W", &step.define_area.w, 1, 128)
+		ui_drag_int("H", &step.define_area.h, 1, 128)
+	case .Pack_Rooms:
+		ui_drag_int("Max Rooms", &step.pack_rooms.max_rooms, 0, 200)
+	case .Join_Rooms:
+		imgui.TextColored({0.5, 0.5, 0.6, 1.0}, "(no parameters)")
+	case .Connect_Doors:
+		mode_val := c.int(step.connect_doors.mode)
+		if imgui.Combo("Mode", &mode_val, "All\x00Minimal\x00\x00") {
+			step.connect_doors.mode = Connect_Doors_Mode(mode_val)
+		}
+		ui_drag_int("Max/Pair", &step.connect_doors.max_per_pair, 0, 10)
+	case .Place_Specific:
+		tmpl_idx := clamp(step.place_specific.template_index, 0, len(MODULE_TEMPLATES) - 1)
+		tmpl_val := c.int(tmpl_idx)
+		if imgui.Combo("Template", &tmpl_val, "Small Room\x00Large Room\x00Long Hall\x00L-Shape\x00Cross\x00Grand Hall\x00Throne Room\x00\x00") {
+			step.place_specific.template_index = int(tmpl_val)
+		}
+		ui_drag_int("X", &step.place_specific.x, 0, 128)
+		ui_drag_int("Y", &step.place_specific.y, 0, 128)
+		rot_val := c.int(step.place_specific.rotation)
+		if imgui.Combo("Rotation", &rot_val, "0 deg\x0090 deg\x00180 deg\x00270 deg\x00\x00") {
+			step.place_specific.rotation = int(rot_val)
+		}
+	case .Mirror_Rooms:
+		axis_val := c.int(step.mirror_rooms.axis)
+		if imgui.Combo("Axis", &axis_val, "X (L/R)\x00Y (T/B)\x00\x00") {
+			step.mirror_rooms.axis = Mirror_Axis(axis_val)
+		}
+		ui_drag_int("Axis Pos", &step.mirror_rooms.axis_pos, 0, 128)
+	case .Place_Symmetric:
+		sym_val := c.int(step.place_symmetric.symmetry)
+		if imgui.Combo("Symmetry", &sym_val, "Mirror X\x00Mirror Y\x00Mirror XY\x00Rotate 4\x00\x00") {
+			step.place_symmetric.symmetry = Symmetry_Mode(sym_val)
+		}
+		ui_drag_int("Axis X", &step.place_symmetric.axis_x, 0, 128)
+		ui_drag_int("Axis Y", &step.place_symmetric.axis_y, 0, 128)
+		ui_drag_int("Max Rooms", &step.place_symmetric.max_rooms, 0, 200)
+	case .Place_Perimeter:
+		imgui.SliderFloat("Gap Chance", &step.place_perimeter.gap_chance, 0.0, 0.5)
+		ui_drag_int("Max Rooms", &step.place_perimeter.max_rooms, 0, 200)
+	case .Place_Along_Line:
+		ui_drag_int("X1", &step.place_along_line.x1, 0, 128)
+		ui_drag_int("Y1", &step.place_along_line.y1, 0, 128)
+		ui_drag_int("X2", &step.place_along_line.x2, 0, 128)
+		ui_drag_int("Y2", &step.place_along_line.y2, 0, 128)
+		side_val := c.int(step.place_along_line.door_side)
+		if imgui.Combo("Door Side", &side_val, "Left\x00Right\x00Both\x00\x00") {
+			step.place_along_line.door_side = int(side_val)
+		}
+		ui_drag_int("Spacing", &step.place_along_line.spacing, 0, 10)
+	case .Fill_Area:
+		ui_drag_int("Red", &step.fill_area.color_r, 0, 255)
+		ui_drag_int("Green", &step.fill_area.color_g, 0, 255)
+		ui_drag_int("Blue", &step.fill_area.color_b, 0, 255)
+	case .Wall_Border:
+		ui_drag_int("Thickness", &step.wall_border.thickness, 1, 5)
+	case .Connect_Linear:
+		imgui.SliderFloat("Manhattan", &step.connect_linear.manhattan_weight, 0.0, 1.0)
+	}
+
+	// Area constraint (for all steps except Define_Area)
+	if step.type != .Define_Area {
+		imgui.Spacing()
+		ui_drag_int("Area", &step.area_id, -1, 9)
+		if step.area_id >= 0 {
+			imgui.Checkbox("Exclude", &step.area_exclude)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Main draw_ui
+// ---------------------------------------------------------------------------
+
 draw_ui :: proc() {
-	screen_h := rl.GetScreenHeight()
-
-	// Panel background
-	rl.DrawRectangle(0, 0, PANEL_WIDTH, screen_h, UI_BG)
-	rl.DrawLine(PANEL_WIDTH, 0, PANEL_WIDTH, screen_h, UI_SEPARATOR)
-
-	// Init layout
-	ui_layout = UI_Layout{
-		x       = 12,
-		y       = 8,
-		w       = PANEL_WIDTH - 24,
-		padding = 12,
-		spacing = 4,
-		mouse_on_panel = ui_mouse_on_panel(),
-	}
-
-	// Title
-	draw_text("Dungeon Generator", ui_layout.x, ui_layout.y, 18, rl.RAYWHITE)
-	ui_layout.y += 26
-
-	// ---- Status section ----
-	ui_section("Status")
-
-	cam_text: cstring = state.camera_mode == .Top_Down ? "Top-Down" : "Freeflight"
-	ui_label_value("Camera", cam_text)
-
-	// Generation status from recipe execution state
+	screen_h := f32(rl.GetScreenHeight())
 	d := &state.dungeon
-	gen_text: cstring
-	if d.gen_done {
-		gen_text = "Done"
-	} else if d.current_step < len(d.recipe.steps) {
-		step_type := d.recipe.steps[d.current_step].type
-		gen_text = STEP_TYPE_NAMES[step_type]
-	} else {
-		gen_text = "Finishing..."
+
+	imgui.SetNextWindowPos({0, 0})
+	imgui.SetNextWindowSize({f32(PANEL_WIDTH), screen_h})
+	if !imgui.Begin("Dungeon Generator", nil, {.NoMove, .NoResize, .NoCollapse, .NoBringToFrontOnFocus}) {
+		imgui.End()
+		return
 	}
-	ui_label_value("Generation", gen_text)
+	defer imgui.End()
 
-	ui_label_value("Rooms", fmt.ctprintf("%d", len(d.modules)))
-	ui_label_value("Seed", fmt.ctprintf("%d", d.actual_seed), UI_TEXT_DIM)
-	ui_label_value("FPS", fmt.ctprintf("%d", rl.GetFPS()), rl.GREEN)
+	// ---- Status ----
+	if imgui.CollapsingHeader("Status", {.DefaultOpen}) {
+		cam_text: cstring = state.camera_mode == .Top_Down ? "Top-Down" : "Freeflight"
+		imgui.Text("Camera:     %s", cam_text)
 
-	// ---- Recipe section ----
-	ui_section("Recipe")
-
-	// Preset dropdown
-	if ui_dropdown("Preset", PRESET_NAMES[:], &preset_selected) {
-		recipe_destroy(&d.recipe)
-		d.recipe = preset_recipe_by_index(preset_selected)
-		// Reset expanded steps and scroll
-		for i in 0 ..< len(expanded_steps) {
-			expanded_steps[i] = false
-		}
-		step_list_scroll = 0
-	}
-
-	// Seed stepper (u64 displayed as int for stepper convenience)
-	seed_int := int(d.recipe.seed)
-	if ui_int_stepper("Seed (0=rand)", &seed_int, 0, 99999, 1) {
-		d.recipe.seed = u64(seed_int)
-	}
-
-	ui_separator()
-
-	// Step list (scrollable)
-	ui_label("Steps:", UI_TEXT_DIM)
-
-	remove_idx := -1  // index of step to remove (deferred)
-	swap_idx   := -1  // index of step to swap with the one below (deferred)
-
-	// Calculate available height for the step list: leave room for the
-	// Add Step controls, Display section, Actions section, and Controls help.
-	// Reserve ~380px for everything below the step list.
-	steps_max_h := screen_h - ui_layout.y - 380
-	if steps_max_h < 80 do steps_max_h = 80
-
-	// First pass: measure total content height by rendering into a virtual layout
-	step_list_start_y := ui_layout.y
-	{
-		measure_y: i32 = 0
-		row_h: i32 = 22
-		for si in 0 ..< len(d.recipe.steps) {
-			measure_y += row_h + 2
-			if si < len(expanded_steps) && expanded_steps[si] {
-				// Rough estimate: params take ~25px per widget, plus area controls
-				measure_y += 80  // conservative estimate per expanded step
-			}
-		}
-		step_list_content_h = measure_y
-	}
-
-	// Clamp scroll offset
-	scroll_max := step_list_content_h - steps_max_h
-	if scroll_max < 0 do scroll_max = 0
-	if step_list_scroll > scroll_max do step_list_scroll = scroll_max
-	if step_list_scroll < 0 do step_list_scroll = 0
-	needs_scroll := step_list_content_h > steps_max_h
-
-	// Mouse wheel scrolling over the step list area
-	step_list_rect := rl.Rectangle{f32(ui_layout.x), f32(step_list_start_y), f32(ui_layout.w), f32(steps_max_h)}
-	{
-		mouse := rl.GetMousePosition()
-		if rl.CheckCollisionPointRec(mouse, step_list_rect) && active_dropdown == nil {
-			wheel := rl.GetMouseWheelMove()
-			if wheel != 0 {
-				step_list_scroll -= i32(wheel * 20)
-				if step_list_scroll < 0 do step_list_scroll = 0
-				if step_list_scroll > scroll_max do step_list_scroll = scroll_max
-			}
-		}
-	}
-
-	// Begin scissor for step list
-	rl.BeginScissorMode(0, step_list_start_y, PANEL_WIDTH, steps_max_h)
-
-	// Offset layout by scroll
-	ui_layout.y -= step_list_scroll
-
-	for si in 0 ..< len(d.recipe.steps) {
-		step := &d.recipe.steps[si]
-		l := &ui_layout
-
-		// Step row background - highlight if currently executing
-		is_active := !d.gen_done && si == d.current_step
-		step_bg := is_active ? UI_STEP_ACTIVE : UI_STEP_BG
-		row_h: i32 = 22
-		rl.DrawRectangle(l.x, l.y, l.w, row_h, step_bg)
-
-		// Step number + type label (colored)
-		type_color := STEP_TYPE_COLORS[step.type]
-		step_label := fmt.ctprintf("%d. %s", si + 1, STEP_TYPE_NAMES[step.type])
-		draw_text(step_label, l.x + 4, l.y + 4, 13, type_color)
-
-		mouse := rl.GetMousePosition()
-
-		// Only process clicks if the row is within the visible area
-		row_visible := l.y + row_h > step_list_start_y && l.y < step_list_start_y + steps_max_h
-
-		// Right-side buttons: [^] [v] [X]
-		btn_sz: i32 = 20
-		btn_y := l.y + 1
-
-		// Remove button [X]
-		remove_x := l.x + l.w - btn_sz - 2
-		if row_visible && ui_small_button(remove_x, btn_y, btn_sz, btn_sz, "X", UI_REMOVE_BG, UI_REMOVE_HOVER) {
-			remove_idx = si
-		} else if !row_visible {
-			rl.DrawRectangle(remove_x, btn_y, btn_sz, btn_sz, UI_REMOVE_BG)
-		}
-
-		// Move down [v]
-		down_x := remove_x - btn_sz - 2
-		if si < len(d.recipe.steps) - 1 {
-			if row_visible && ui_small_button(down_x, btn_y, btn_sz, btn_sz, "v", UI_WIDGET_BG, UI_WIDGET_HOVER) {
-				swap_idx = si // swap si with si+1
-			} else if !row_visible {
-				rl.DrawRectangle(down_x, btn_y, btn_sz, btn_sz, UI_WIDGET_BG)
-			}
+		gen_text: cstring
+		if d.gen_done {
+			gen_text = "Done"
+		} else if d.current_step < len(d.recipe.steps) {
+			gen_text = STEP_TYPE_NAMES[d.recipe.steps[d.current_step].type]
 		} else {
-			rl.DrawRectangle(down_x, btn_y, btn_sz, btn_sz, UI_STEP_BG)
-			draw_text("v", down_x + 5, btn_y + 4, 12, rl.Color{60, 60, 70, 255})
+			gen_text = "Finishing..."
 		}
+		imgui.Text("Generation: %s", gen_text)
+		imgui.Text("Rooms:      %d", len(d.modules))
+		imgui.Text("Seed:       %d", d.actual_seed)
+		imgui.Text("FPS:        %d", rl.GetFPS())
+	}
 
-		// Move up [^]
-		up_x := down_x - btn_sz - 2
-		if si > 0 {
-			if row_visible && ui_small_button(up_x, btn_y, btn_sz, btn_sz, "^", UI_WIDGET_BG, UI_WIDGET_HOVER) {
-				swap_idx = si - 1 // swap si-1 with si
-			} else if !row_visible {
-				rl.DrawRectangle(up_x, btn_y, btn_sz, btn_sz, UI_WIDGET_BG)
-			}
-		} else {
-			rl.DrawRectangle(up_x, btn_y, btn_sz, btn_sz, UI_STEP_BG)
-			draw_text("^", up_x + 5, btn_y + 4, 12, rl.Color{60, 60, 70, 255})
-		}
-
-		// Expand/collapse toggle - click on the row (excluding the buttons)
-		if row_visible {
-			buttons_w: i32 = (btn_sz + 2) * 3
-			row_rect := rl.Rectangle{f32(l.x), f32(l.y), f32(l.w - buttons_w), f32(row_h)}
-			if rl.CheckCollisionPointRec(mouse, row_rect) && rl.IsMouseButtonPressed(.LEFT) && active_dropdown == nil {
-				if si < len(expanded_steps) {
-					expanded_steps[si] = !expanded_steps[si]
+	// ---- Recipe ----
+	if imgui.CollapsingHeader("Recipe", {.DefaultOpen}) {
+		// Preset combo
+		if imgui.BeginCombo("Preset", PRESET_NAMES[preset_selected]) {
+			for i in 0 ..< len(PRESET_NAMES) {
+				is_sel := i == preset_selected
+				if imgui.Selectable(PRESET_NAMES[i], is_sel) {
+					preset_selected = i
+					recipe_destroy(&d.recipe)
+					d.recipe = preset_recipe_by_index(preset_selected)
 				}
+				if is_sel do imgui.SetItemDefaultFocus()
 			}
+			imgui.EndCombo()
 		}
 
-		l.y += row_h + 2
-
-		// Show params if expanded
-		if si < len(expanded_steps) && expanded_steps[si] {
-			ui_step_params(step)
+		// Seed
+		seed_int := c.int(d.recipe.seed)
+		if imgui.DragInt("Seed (0=rand)", &seed_int, 1.0, 0, 99999) {
+			d.recipe.seed = u64(seed_int)
 		}
-	}
 
-	rl.EndScissorMode()
+		imgui.Separator()
+		imgui.Text("Steps:")
 
-	// Restore layout Y to after the step list area
-	ui_layout.y = step_list_start_y + steps_max_h
+		// Step list
+		remove_idx := -1
+		swap_idx := -1
 
-	// Draw scroll indicators
-	if needs_scroll {
-		indicator_color := rl.Color{180, 180, 200, 180}
-		if step_list_scroll > 0 {
-			draw_text("^ ^ ^", ui_layout.x + ui_layout.w / 2 - 18, step_list_start_y + 2, 10, indicator_color)
-		}
-		if step_list_scroll < scroll_max {
-			draw_text("v v v", ui_layout.x + ui_layout.w / 2 - 18, step_list_start_y + steps_max_h - 12, 10, indicator_color)
-		}
-	}
+		for si in 0 ..< len(d.recipe.steps) {
+			step := &d.recipe.steps[si]
+			imgui.PushIDInt(c.int(si))
 
-	// Deferred step reorder (swap idx with idx+1)
-	if swap_idx >= 0 && swap_idx < len(d.recipe.steps) - 1 {
-		d.recipe.steps[swap_idx], d.recipe.steps[swap_idx + 1] = d.recipe.steps[swap_idx + 1], d.recipe.steps[swap_idx]
-		// Swap expanded state too
-		if swap_idx < len(expanded_steps) - 1 {
-			expanded_steps[swap_idx], expanded_steps[swap_idx + 1] = expanded_steps[swap_idx + 1], expanded_steps[swap_idx]
-		}
-	}
+			is_active := !d.gen_done && si == d.current_step
+			type_color := rl_color_to_vec4(STEP_TYPE_COLORS[step.type])
+			label := fmt.ctprintf("%d. %s", si + 1, STEP_TYPE_NAMES[step.type])
 
-	// Deferred step removal
-	if remove_idx >= 0 && len(d.recipe.steps) > 0 {
-		ordered_remove(&d.recipe.steps, remove_idx)
-		// Shift expanded state
-		for i in remove_idx ..< len(expanded_steps) - 1 {
-			expanded_steps[i] = expanded_steps[i + 1]
-		}
-		if len(expanded_steps) > 0 {
-			expanded_steps[len(expanded_steps) - 1] = false
-		}
-	}
+			flags: imgui.TreeNodeFlags = {.OpenOnArrow, .SpanAvailWidth}
+			if is_active do flags |= {.Selected}
 
-	// Add step controls
-	ui_layout.y += 4
+			imgui.PushStyleColorImVec4(.Text, type_color)
+			is_open := imgui.TreeNodeEx(label, flags)
+			imgui.PopStyleColor()
 
-	l := &ui_layout
-	// Dropdown + Add button on same row
-	add_row_h: i32 = 24
-	dropdown_w := l.w - 50
-	mouse := rl.GetMousePosition()
-
-	// Mini dropdown for step type
-	add_dd_rect := rl.Rectangle{f32(l.x), f32(l.y), f32(dropdown_w), f32(add_row_h)}
-	add_dd_hovered := rl.CheckCollisionPointRec(mouse, add_dd_rect)
-	is_add_open := active_dropdown == "add_step"
-
-	rl.DrawRectangleRec(add_dd_rect, add_dd_hovered && !is_add_open ? UI_WIDGET_HOVER : UI_WIDGET_BG)
-	draw_text(ADD_STEP_OPTIONS[add_step_type_selected], l.x + 6, l.y + 5, 12, UI_TEXT)
-	draw_text(is_add_open ? "^" : "v", l.x + dropdown_w - 16, l.y + 5, 12, UI_TEXT_DIM)
-
-	if add_dd_hovered && rl.IsMouseButtonPressed(.LEFT) {
-		if is_add_open {
-			active_dropdown = nil
-		} else {
-			active_dropdown = "add_step"
-			// Reset scroll, keep selected item visible
-			add_opt_count := i32(len(ADD_STEP_OPTIONS))
-			add_max_vis: i32 = 10
-			if add_opt_count <= add_max_vis {
-				dropdown_scroll = 0
+			// Right-aligned buttons on the same line
+			imgui.SameLine(imgui.GetWindowWidth() - 75)
+			if si > 0 {
+				if imgui.SmallButton("^") do swap_idx = si - 1
 			} else {
-				dropdown_scroll = clamp(i32(add_step_type_selected) - add_max_vis / 2, 0, add_opt_count - add_max_vis)
+				imgui.SmallButton("^") // disabled visually
 			}
-		}
-	}
-
-	// [Add] button
-	add_btn_x := l.x + dropdown_w + 4
-	add_btn_w := l.w - dropdown_w - 4
-	if ui_small_button(add_btn_x, l.y, add_btn_w, add_row_h, "Add", UI_ACCENT, UI_ACCENT_HOVER) {
-		new_step := make_step(ADD_STEP_TYPES[add_step_type_selected])
-		// Set sensible defaults
-		switch new_step.type {
-		case .Seed_Rooms:
-			new_step.seed_rooms = {count = 8}
-		case .Grow_Clusters:
-			new_step.grow_clusters = {chance = 0.4, min_rooms = 1, max_rooms = 4}
-		case .Connect_MST:
-			new_step.connect_mst = {manhattan_weight = 0.8}
-		case .Mark_Doors:
-			// no params
-		case .Add_Loops:
-			new_step.add_loops = {loop_chance = 0.3, max_extra = 4, manhattan_weight = 0.5}
-		case .Widen_Corridors:
-			new_step.widen_corridors = {width = 3}
-		case .BSP_Partition:
-			new_step.bsp_partition = {min_size = 8, padding = 2}
-		case .Fill_Dead_Ends:
-			new_step.fill_dead_ends = {iterations = 3}
-		case .Place_Grid:
-			new_step.place_grid = {cols = 3, rows = 3, jitter = 0.2}
-		case .Room_Corridor:
-			new_step.room_corridor = {strictness = 0.5, manhattan_weight = 0.8, max_chain = 6}
-		case .Define_Area:
-			new_step.define_area = {area_id = 0, shape = .Rectangle, x = 8, y = 8, w = 16, h = 16}
-		case .Pack_Rooms:
-			new_step.pack_rooms = {max_rooms = 0}
-		case .Join_Rooms:
-			// no params
-		case .Connect_Doors:
-			new_step.connect_doors = {mode = .Minimal, max_per_pair = 1}
-		case .Place_Specific:
-			new_step.place_specific = {template_index = 1, x = 30, y = 30, rotation = 0}
-		case .Mirror_Rooms:
-			new_step.mirror_rooms = {axis = .X, axis_pos = 0}
-		case .Place_Symmetric:
-			new_step.place_symmetric = {symmetry = .Mirror_X, axis_x = 0, axis_y = 0, max_rooms = 30}
-		case .Place_Perimeter:
-			new_step.place_perimeter = {gap_chance = 0.05, max_rooms = 0}
-		case .Place_Along_Line:
-			new_step.place_along_line = {x1 = 10, y1 = 32, x2 = 54, y2 = 32, door_side = 1, spacing = 0}
-		case .Fill_Area:
-			new_step.fill_area = {color_r = 120, color_g = 100, color_b = 70}
-		case .Wall_Border:
-			new_step.wall_border = {thickness = 2}
-		case .Connect_Linear:
-			new_step.connect_linear = {manhattan_weight = 0.8}
-		}
-		append(&d.recipe.steps, new_step)
-	}
-
-	l.y += add_row_h
-
-	// Add step type dropdown list (if open) - with scrolling
-	if is_add_open {
-		opt_h: i32 = 24
-		opt_count := i32(len(ADD_STEP_OPTIONS))
-		max_visible: i32 = 10
-		visible := min(opt_count, max_visible)
-		can_scroll := opt_count > max_visible
-		max_scroll := opt_count - max_visible
-		list_h := visible * opt_h
-
-		// Background
-		list_rect := rl.Rectangle{f32(l.x), f32(l.y), f32(dropdown_w), f32(list_h)}
-		rl.DrawRectangleRec(list_rect, rl.Color{45, 45, 55, 250})
-
-		// Mouse wheel scrolling
-		if can_scroll && rl.CheckCollisionPointRec(mouse, list_rect) {
-			wheel := rl.GetMouseWheelMove()
-			if wheel != 0 {
-				dropdown_scroll = clamp(dropdown_scroll - i32(wheel), 0, max_scroll)
-			}
-		}
-
-		for vi in 0 ..< visible {
-			item_idx := int(vi + dropdown_scroll)
-			opt_y := l.y + vi * opt_h
-			opt_rect := rl.Rectangle{f32(l.x), f32(opt_y), f32(dropdown_w), f32(opt_h)}
-			opt_hovered := rl.CheckCollisionPointRec(mouse, opt_rect)
-
-			if item_idx == add_step_type_selected {
-				rl.DrawRectangleRec(opt_rect, UI_ACCENT)
-				draw_text(ADD_STEP_OPTIONS[item_idx], l.x + 6, opt_y + 5, 12, rl.Color{20, 20, 25, 255})
+			imgui.SameLine()
+			if si < len(d.recipe.steps) - 1 {
+				if imgui.SmallButton("v") do swap_idx = si
 			} else {
-				rl.DrawRectangleRec(opt_rect, opt_hovered ? UI_WIDGET_HOVER : rl.Color{45, 45, 55, 250})
-				draw_text(ADD_STEP_OPTIONS[item_idx], l.x + 6, opt_y + 5, 12, UI_TEXT)
+				imgui.SmallButton("v")
+			}
+			imgui.SameLine()
+			if imgui.SmallButton("X") do remove_idx = si
+
+			if is_open {
+				ui_step_params(step)
+				imgui.TreePop()
 			}
 
-			if opt_hovered && rl.IsMouseButtonPressed(.LEFT) {
-				add_step_type_selected = item_idx
-				active_dropdown = nil
-			}
+			imgui.PopID()
 		}
 
-		// Scroll indicators
-		if can_scroll {
-			indicator_color := rl.Color{180, 180, 200, 180}
-			if dropdown_scroll > 0 {
-				draw_text("^", l.x + dropdown_w - 14, l.y + 2, 10, indicator_color)
-			}
-			if dropdown_scroll < max_scroll {
-				draw_text("v", l.x + dropdown_w - 14, l.y + list_h - 12, 10, indicator_color)
-			}
+		// Deferred swap
+		if swap_idx >= 0 && swap_idx < len(d.recipe.steps) - 1 {
+			d.recipe.steps[swap_idx], d.recipe.steps[swap_idx + 1] = d.recipe.steps[swap_idx + 1], d.recipe.steps[swap_idx]
 		}
 
-		l.y += list_h
+		// Deferred remove
+		if remove_idx >= 0 && len(d.recipe.steps) > 0 {
+			ordered_remove(&d.recipe.steps, remove_idx)
+		}
+
+		imgui.Spacing()
+
+		// Add step
+		imgui.SetNextItemWidth(imgui.GetContentRegionAvail().x - 40)
+		if imgui.BeginCombo("##add_type", ADD_STEP_OPTIONS[add_step_type_selected]) {
+			for i in 0 ..< len(ADD_STEP_OPTIONS) {
+				is_sel := i == add_step_type_selected
+				if imgui.Selectable(ADD_STEP_OPTIONS[i], is_sel) {
+					add_step_type_selected = i
+				}
+				if is_sel do imgui.SetItemDefaultFocus()
+			}
+			imgui.EndCombo()
+		}
+		imgui.SameLine()
+		if imgui.Button("Add") {
+			new_step := make_step(ADD_STEP_TYPES[add_step_type_selected])
+			switch new_step.type {
+			case .Seed_Rooms:
+				new_step.seed_rooms = {count = 8}
+			case .Grow_Clusters:
+				new_step.grow_clusters = {chance = 0.4, min_rooms = 1, max_rooms = 4}
+			case .Connect_MST:
+				new_step.connect_mst = {manhattan_weight = 0.8}
+			case .Mark_Doors:
+			case .Add_Loops:
+				new_step.add_loops = {loop_chance = 0.3, max_extra = 4, manhattan_weight = 0.5}
+			case .Widen_Corridors:
+				new_step.widen_corridors = {width = 3}
+			case .BSP_Partition:
+				new_step.bsp_partition = {min_size = 8, padding = 2}
+			case .Fill_Dead_Ends:
+				new_step.fill_dead_ends = {iterations = 3}
+			case .Place_Grid:
+				new_step.place_grid = {cols = 3, rows = 3, jitter = 0.2}
+			case .Room_Corridor:
+				new_step.room_corridor = {strictness = 0.5, manhattan_weight = 0.8, max_chain = 6}
+			case .Define_Area:
+				new_step.define_area = {area_id = 0, shape = .Rectangle, x = 8, y = 8, w = 16, h = 16}
+			case .Pack_Rooms:
+				new_step.pack_rooms = {max_rooms = 0}
+			case .Join_Rooms:
+			case .Connect_Doors:
+				new_step.connect_doors = {mode = .Minimal, max_per_pair = 1}
+			case .Place_Specific:
+				new_step.place_specific = {template_index = 1, x = 30, y = 30, rotation = 0}
+			case .Mirror_Rooms:
+				new_step.mirror_rooms = {axis = .X, axis_pos = 0}
+			case .Place_Symmetric:
+				new_step.place_symmetric = {symmetry = .Mirror_X, axis_x = 0, axis_y = 0, max_rooms = 30}
+			case .Place_Perimeter:
+				new_step.place_perimeter = {gap_chance = 0.05, max_rooms = 0}
+			case .Place_Along_Line:
+				new_step.place_along_line = {x1 = 10, y1 = 32, x2 = 54, y2 = 32, door_side = 1, spacing = 0}
+			case .Fill_Area:
+				new_step.fill_area = {color_r = 120, color_g = 100, color_b = 70}
+			case .Wall_Border:
+				new_step.wall_border = {thickness = 2}
+			case .Connect_Linear:
+				new_step.connect_linear = {manhattan_weight = 0.8}
+			}
+			append(&d.recipe.steps, new_step)
+		}
 	}
 
-	l.y += l.spacing
-
-	// ---- Display settings ----
-	ui_section("Display")
-
-	// Grid size dropdown
-	if ui_dropdown("Grid Size", GRID_SIZE_OPTIONS[:], &grid_size_selected) {
-		new_size := GRID_SIZE_VALUES[grid_size_selected]
-		if new_size != d.config.grid_width {
-			// Save config before destroying, since d points into state.dungeon
-			new_config := d.config
-			new_config.grid_width = new_size
-			new_config.grid_height = new_size
-			dungeon_destroy(d)
-			state.dungeon = dungeon_create(new_config)
-			d = &state.dungeon
-			d.recipe = preset_recipe_by_index(preset_selected)
-			state.topdown_camera = topdown_camera_create(d.config)
-			state.freeflight_cam = freeflight_camera_create(d.config)
-			dungeon_generate_full(d)
+	// ---- Display ----
+	if imgui.CollapsingHeader("Display", {.DefaultOpen}) {
+		// Grid size combo
+		grid_val := c.int(grid_size_selected)
+		if imgui.BeginCombo("Grid Size", GRID_SIZE_OPTIONS[grid_size_selected]) {
+			for i in 0 ..< len(GRID_SIZE_OPTIONS) {
+				is_sel := i == grid_size_selected
+				if imgui.Selectable(GRID_SIZE_OPTIONS[i], is_sel) {
+					grid_size_selected = i
+					new_size := GRID_SIZE_VALUES[grid_size_selected]
+					if new_size != d.config.grid_width {
+						new_config := d.config
+						new_config.grid_width = new_size
+						new_config.grid_height = new_size
+						dungeon_destroy(d)
+						state.dungeon = dungeon_create(new_config)
+						d = &state.dungeon
+						d.recipe = preset_recipe_by_index(preset_selected)
+						state.topdown_camera = topdown_camera_create(d.config)
+						state.freeflight_cam = freeflight_camera_create(d.config)
+						dungeon_generate_full(d)
+					}
+				}
+				if is_sel do imgui.SetItemDefaultFocus()
+			}
+			imgui.EndCombo()
 		}
+
+		imgui.SliderFloat("Wall Height", &d.config.wall_height, 0.5, 4.0)
+		imgui.Checkbox("Show Ceilings", &show_ceilings)
+		imgui.Checkbox("Join Rooms", &join_rooms)
+		imgui.SliderFloat("Anim Speed", &gen_step_interval, 0.01, 0.3, "%.2fs")
+		imgui.Checkbox("Animated Mode", &state.gen_animated)
 	}
-
-	ui_slider("Wall Height", &d.config.wall_height, 0.5, 4.0)
-
-	ui_toggle("Show Ceilings", &show_ceilings)
-
-	ui_toggle("Join Rooms", &join_rooms)
-
-	ui_slider("Anim Speed", &gen_step_interval, 0.01, 0.3, "%.2fs")
-
-	ui_toggle("Animated Mode", &state.gen_animated)
-
-	ui_separator()
 
 	// ---- Actions ----
-	ui_section("Actions")
-
-	if ui_button("Generate (Instant)", accent = true) {
-		dungeon_generate_full(d)
-	}
-
-	if ui_button("Generate (Animated)") {
-		dungeon_start_generation(d)
-		state.gen_animated = true
-		state.gen_step_timer = 0
-	}
-
-	if ui_button("Step") {
-		if d.gen_done {
+	if imgui.CollapsingHeader("Actions", {.DefaultOpen}) {
+		btn_width := imgui.GetContentRegionAvail().x
+		if imgui.Button("Generate (Instant)", {btn_width, 0}) {
+			dungeon_generate_full(d)
+		}
+		if imgui.Button("Generate (Animated)", {btn_width, 0}) {
 			dungeon_start_generation(d)
+			state.gen_animated = true
 			state.gen_step_timer = 0
 		}
-		dungeon_generate_step(d)
+		if imgui.Button("Step", {btn_width, 0}) {
+			if d.gen_done {
+				dungeon_start_generation(d)
+				state.gen_step_timer = 0
+			}
+			dungeon_generate_step(d)
+		}
+		if imgui.Button("Reset", {btn_width, 0}) {
+			dungeon_reset(d)
+			d.gen_done = true
+		}
 	}
 
-	if ui_button("Reset") {
-		dungeon_reset(d)
-		d.gen_done = true
-	}
-
-	// ---- Controls help ----
-	ui_section("Controls")
-	ui_label("[Tab]   Toggle camera", UI_TEXT_DIM)
-	ui_label("[R]     Regenerate", UI_TEXT_DIM)
-	ui_label("[Space] Step generation", UI_TEXT_DIM)
-	ui_label("[H]     Toggle panel", UI_TEXT_DIM)
-	ui_label("[G]     Toggle animated", UI_TEXT_DIM)
-
-	// Close dropdown if clicked outside panel
-	if active_dropdown != nil && rl.IsMouseButtonPressed(.LEFT) && !ui_mouse_on_panel() {
-		active_dropdown = nil
+	// ---- Controls ----
+	if imgui.CollapsingHeader("Controls") {
+		imgui.TextColored({0.5, 0.5, 0.6, 1.0}, "[Tab]   Toggle camera")
+		imgui.TextColored({0.5, 0.5, 0.6, 1.0}, "[R]     Regenerate")
+		imgui.TextColored({0.5, 0.5, 0.6, 1.0}, "[Space] Step generation")
+		imgui.TextColored({0.5, 0.5, 0.6, 1.0}, "[H]     Toggle panel")
+		imgui.TextColored({0.5, 0.5, 0.6, 1.0}, "[G]     Toggle animated")
 	}
 }
 

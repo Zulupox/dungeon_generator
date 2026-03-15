@@ -1,8 +1,9 @@
 package dungeon_generator
 
 import rl "vendor:raylib"
-import "core:fmt"
-import "core:math"
+
+import imgui "libs/odin-imgui"
+import imgui_rl "imgui_rl"
 
 // ---------------------------------------------------------------------------
 // Application state
@@ -26,10 +27,6 @@ App_State :: struct {
 // Global state (accessible from ui.odin etc.)
 state: App_State
 
-// Custom UI font (loaded at startup)
-ui_font: rl.Font
-ui_font_loaded: bool
-
 // ---------------------------------------------------------------------------
 // Entry point
 // ---------------------------------------------------------------------------
@@ -46,20 +43,11 @@ main :: proc() {
 	defer rl.CloseWindow()
 	rl.SetTargetFPS(60)
 
-	// Load custom font (Arial) - must be after InitWindow
-	// Platform-specific font path
-	when ODIN_OS == .Windows {
-		FONT_PATH :: "C:\\Windows\\Fonts\\arial.ttf"
-	} else when ODIN_OS == .Darwin {
-		FONT_PATH :: "/System/Library/Fonts/Supplemental/Arial.ttf"
-	} else {
-		FONT_PATH :: "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf"
-	}
-	ui_font = rl.LoadFontEx(FONT_PATH, 32, nil, 0)
-	if ui_font.texture.id > 0 {
-		ui_font_loaded = true
-		rl.SetTextureFilter(ui_font.texture, .BILINEAR)
-	}
+	imgui.CreateContext(nil)
+	defer imgui.DestroyContext(nil)
+	imgui_rl.init()
+	defer imgui_rl.shutdown()
+	imgui_rl.build_font_atlas()
 
 	state.dungeon = dungeon_create(config)
 	state.dungeon.recipe = recipe_classic_dungeon()
@@ -70,19 +58,20 @@ main :: proc() {
 	gen_step_interval = 0.05
 	state.show_ui = true
 
-	// Generate immediately on start (instant mode)
 	dungeon_generate_full(&state.dungeon)
 
 	for !rl.WindowShouldClose() {
 		dt := rl.GetFrameTime()
+
+		imgui_rl.process_events()
+		imgui_rl.new_frame()
+		imgui.NewFrame()
+
 		update(dt)
 		draw()
 	}
 
 	dungeon_destroy(&state.dungeon)
-	if ui_font_loaded {
-		rl.UnloadFont(ui_font)
-	}
 }
 
 // ---------------------------------------------------------------------------
@@ -90,48 +79,45 @@ main :: proc() {
 // ---------------------------------------------------------------------------
 
 update :: proc(dt: f32) {
-	// Toggle camera mode
-	if rl.IsKeyPressed(.TAB) {
-		if state.camera_mode == .Top_Down {
-			state.camera_mode = .Freeflight
-			rl.DisableCursor()
-		} else {
-			state.camera_mode = .Top_Down
-			rl.EnableCursor()
+	io := imgui.GetIO()
+
+	if !io.WantCaptureKeyboard {
+		if rl.IsKeyPressed(.TAB) {
+			if state.camera_mode == .Top_Down {
+				state.camera_mode = .Freeflight
+				rl.DisableCursor()
+			} else {
+				state.camera_mode = .Top_Down
+				rl.EnableCursor()
+			}
+		}
+
+		if rl.IsKeyPressed(.H) {
+			state.show_ui = !state.show_ui
+		}
+
+		if rl.IsKeyPressed(.G) {
+			state.gen_animated = !state.gen_animated
+		}
+
+		if rl.IsKeyPressed(.R) {
+			if state.gen_animated {
+				dungeon_start_generation(&state.dungeon)
+				state.gen_step_timer = 0
+			} else {
+				dungeon_generate_full(&state.dungeon)
+			}
+		}
+
+		if rl.IsKeyPressed(.SPACE) {
+			if state.dungeon.gen_done {
+				dungeon_start_generation(&state.dungeon)
+				state.gen_step_timer = 0
+			}
+			dungeon_generate_step(&state.dungeon)
 		}
 	}
 
-	// Toggle UI
-	if rl.IsKeyPressed(.H) {
-		state.show_ui = !state.show_ui
-	}
-
-	// Toggle animated generation
-	if rl.IsKeyPressed(.G) {
-		state.gen_animated = !state.gen_animated
-	}
-
-	// Regenerate dungeon
-	if rl.IsKeyPressed(.R) {
-		if state.gen_animated {
-			dungeon_start_generation(&state.dungeon)
-			state.gen_step_timer = 0
-		} else {
-			dungeon_generate_full(&state.dungeon)
-		}
-	}
-
-	// Step through generation manually with Space
-	if rl.IsKeyPressed(.SPACE) {
-		if state.dungeon.gen_done {
-			// Reset and start a new stepped generation
-			dungeon_start_generation(&state.dungeon)
-			state.gen_step_timer = 0
-		}
-		dungeon_generate_step(&state.dungeon)
-	}
-
-	// Animated generation auto-step
 	if state.gen_animated && !state.dungeon.gen_done {
 		state.gen_step_timer += dt
 		if state.gen_step_timer >= gen_step_interval {
@@ -140,12 +126,13 @@ update :: proc(dt: f32) {
 		}
 	}
 
-	// Update active camera
-	switch state.camera_mode {
-	case .Top_Down:
-		topdown_camera_update(&state.topdown_camera, dt)
-	case .Freeflight:
-		freeflight_camera_update(&state.freeflight_cam, dt)
+	if !io.WantCaptureMouse {
+		switch state.camera_mode {
+		case .Top_Down:
+			topdown_camera_update(&state.topdown_camera, dt)
+		case .Freeflight:
+			freeflight_camera_update(&state.freeflight_cam, dt)
+		}
 	}
 }
 
@@ -159,7 +146,6 @@ draw :: proc() {
 
 	rl.ClearBackground({30, 30, 35, 255})
 
-	// 3D viewport - offset by panel width when UI is visible
 	viewport_x: i32 = state.show_ui ? PANEL_WIDTH : 0
 	viewport_w := rl.GetScreenWidth() - viewport_x
 	viewport_h := rl.GetScreenHeight()
@@ -180,6 +166,9 @@ draw :: proc() {
 	if state.show_ui {
 		draw_ui()
 	}
+
+	imgui.Render()
+	imgui_rl.render_draw_data(imgui.GetDrawData())
 }
 
 get_active_rl_camera :: proc() -> rl.Camera3D {
