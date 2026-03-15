@@ -81,6 +81,15 @@ Placement_Target :: struct {
 	max_h:    int,
 }
 
+// ---------------------------------------------------------------------------
+// Room Groups - named collections of module indices
+// ---------------------------------------------------------------------------
+
+Room_Group :: struct {
+	name:       string,
+	module_ids: [dynamic]int,
+}
+
 Dungeon :: struct {
 	config:  Dungeon_Config,
 	grid:    []Grid_Cell,
@@ -98,6 +107,11 @@ Dungeon :: struct {
 	areas:               [dynamic]Dungeon_Area,
 	active_area_id:      int,   // set by dispatcher from step's area_id; -1 = no constraint
 	active_area_exclude: bool,  // set by dispatcher from step's area_exclude
+
+	// Group system
+	groups:              [dynamic]Room_Group,
+	active_group:        string,  // set by dispatcher from step's group; "" = no tagging
+	active_source_group: string,  // set by dispatcher from step's source_group; "" = no filter
 
 	// Per-step working data (cleared between steps)
 	mst_edges:        [dynamic]Corridor_Job,
@@ -132,6 +146,10 @@ dungeon_destroy :: proc(d: ^Dungeon) {
 	}
 	delete(d.modules)
 	delete(d.areas)
+	for &g in d.groups {
+		delete(g.module_ids)
+	}
+	delete(d.groups)
 	delete(d.mst_edges)
 	delete(d.loop_edges)
 	delete(d.placement_queue)
@@ -145,6 +163,10 @@ dungeon_reset :: proc(d: ^Dungeon) {
 	}
 	clear(&d.modules)
 	clear(&d.areas)
+	for &g in d.groups {
+		delete(g.module_ids)
+	}
+	clear(&d.groups)
 	clear(&d.mst_edges)
 	clear(&d.loop_edges)
 	clear(&d.placement_queue)
@@ -154,6 +176,8 @@ dungeon_reset :: proc(d: ^Dungeon) {
 	d.gen_done = false
 	d.active_area_id = -1
 	d.active_area_exclude = false
+	d.active_group = ""
+	d.active_source_group = ""
 }
 
 dungeon_clear_grid :: proc(d: ^Dungeon) {
@@ -288,6 +312,10 @@ dungeon_generate_step :: proc(d: ^Dungeon) {
 	d.active_area_id = step.area_id
 	d.active_area_exclude = step.area_exclude
 
+	// Set active group context from this step
+	d.active_group = step.group
+	d.active_source_group = step.source_group
+
 	switch step.type {
 	case .Seed_Rooms:
 		execute_seed_rooms(d, &step.seed_rooms)
@@ -317,5 +345,21 @@ dungeon_generate_step :: proc(d: ^Dungeon) {
 		execute_join_rooms(d)
 	case .Connect_Doors:
 		execute_connect_doors(d, &step.connect_doors)
+	case .Place_Specific:
+		execute_place_specific(d, &step.place_specific)
+	case .Mirror_Rooms:
+		execute_mirror_rooms(d, &step.mirror_rooms)
+	case .Place_Symmetric:
+		execute_place_symmetric(d, &step.place_symmetric)
+	case .Place_Perimeter:
+		execute_place_perimeter(d, &step.place_perimeter)
+	case .Place_Along_Line:
+		execute_place_along_line(d, &step.place_along_line)
+	case .Fill_Area:
+		execute_fill_area(d, &step.fill_area)
+	case .Wall_Border:
+		execute_wall_border(d, &step.wall_border)
+	case .Connect_Linear:
+		execute_connect_linear(d, &step.connect_linear)
 	}
 }

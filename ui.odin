@@ -42,6 +42,34 @@ STEP_TYPE_COLORS := [Step_Type]rl.Color{
 	.Pack_Rooms      = rl.Color{160, 255, 180, 255},
 	.Join_Rooms      = rl.Color{255, 220, 180, 255},
 	.Connect_Doors   = rl.Color{255, 180, 220, 255},
+	.Place_Specific  = rl.Color{255, 140, 100, 255},
+	.Mirror_Rooms    = rl.Color{200, 160, 255, 255},
+	.Place_Symmetric = rl.Color{180, 255, 220, 255},
+	.Place_Perimeter  = rl.Color{255, 200, 100, 255},
+	.Place_Along_Line = rl.Color{100, 220, 180, 255},
+	.Fill_Area        = rl.Color{180, 160, 120, 255},
+	.Wall_Border      = rl.Color{140, 130, 110, 255},
+	.Connect_Linear   = rl.Color{120, 180, 255, 255},
+}
+
+// ---------------------------------------------------------------------------
+// Font-aware text helpers (use custom font when loaded, fallback to default)
+// ---------------------------------------------------------------------------
+
+draw_text :: proc(text: cstring, x, y: i32, size: i32, color: rl.Color) {
+	if ui_font_loaded {
+		rl.DrawTextEx(ui_font, text, {f32(x), f32(y)}, f32(size), 1, color)
+	} else {
+		rl.DrawText(text, x, y, size, color)
+	}
+}
+
+measure_text :: proc(text: cstring, size: i32) -> i32 {
+	if ui_font_loaded {
+		v := rl.MeasureTextEx(ui_font, text, f32(size), 1)
+		return i32(v.x)
+	}
+	return rl.MeasureText(text, size)
 }
 
 // UI layout state (reset each frame)
@@ -65,6 +93,10 @@ preset_selected: int = 0
 add_step_type_selected: int = 0
 expanded_steps: [32]bool   // which steps are expanded (up to 32 steps)
 
+// Step list scroll state
+step_list_scroll: i32 = 0      // scroll offset in pixels
+step_list_content_h: i32 = 0   // total content height of the step list
+
 // Check if mouse is over the side panel
 ui_mouse_on_panel :: proc() -> bool {
 	mx := rl.GetMouseX()
@@ -80,7 +112,7 @@ ui_section :: proc(label: cstring) {
 	l := &ui_layout
 	l.y += l.spacing
 	rl.DrawRectangle(0, l.y, PANEL_WIDTH, 24, UI_HEADER_BG)
-	rl.DrawText(label, l.x, l.y + 4, 14, UI_ACCENT)
+	draw_text(label, l.x, l.y + 4, 14, UI_ACCENT)
 	l.y += 24 + l.spacing
 }
 
@@ -99,16 +131,16 @@ ui_spacer :: proc(amount: i32 = 4) {
 // Label
 ui_label :: proc(text: cstring, color: rl.Color = UI_TEXT) {
 	l := &ui_layout
-	rl.DrawText(text, l.x, l.y, 14, color)
+	draw_text(text, l.x, l.y, 14, color)
 	l.y += 18
 }
 
 // Label with value on the right side
 ui_label_value :: proc(label: cstring, value: cstring, value_color: rl.Color = UI_ACCENT) {
 	l := &ui_layout
-	rl.DrawText(label, l.x, l.y, 14, UI_TEXT_DIM)
-	val_width := rl.MeasureText(value, 14)
-	rl.DrawText(value, l.x + l.w - val_width, l.y, 14, value_color)
+	draw_text(label, l.x, l.y, 14, UI_TEXT_DIM)
+	val_width := measure_text(value, 14)
+	draw_text(value, l.x + l.w - val_width, l.y, 14, value_color)
 	l.y += 18
 }
 
@@ -131,8 +163,8 @@ ui_button :: proc(label: cstring, accent: bool = false) -> bool {
 	rl.DrawRectangleRec(rect, bg)
 
 	text_color: rl.Color = accent ? rl.Color{20, 20, 25, 255} : UI_TEXT
-	tw := rl.MeasureText(label, 14)
-	rl.DrawText(label, l.x + (l.w - tw) / 2, l.y + 7, 14, text_color)
+	tw := measure_text(label, 14)
+	draw_text(label, l.x + (l.w - tw) / 2, l.y + 7, 14, text_color)
 
 	l.y += btn_h + l.spacing
 
@@ -147,8 +179,8 @@ ui_small_button :: proc(x, y, w, h: i32, label: cstring, bg_color, hover_color: 
 	pressed := hovered && rl.IsMouseButtonPressed(.LEFT)
 
 	rl.DrawRectangleRec(rect, hovered ? hover_color : bg_color)
-	tw := rl.MeasureText(label, 12)
-	rl.DrawText(label, x + (w - tw) / 2, y + (h - 12) / 2, 12, UI_TEXT)
+	tw := measure_text(label, 12)
+	draw_text(label, x + (w - tw) / 2, y + (h - 12) / 2, 12, UI_TEXT)
 
 	return pressed
 }
@@ -161,7 +193,7 @@ ui_int_stepper :: proc(label: cstring, value: ^int, min_val, max_val, step: int)
 	changed := false
 
 	// Label
-	rl.DrawText(label, l.x, l.y + 5, 14, UI_TEXT_DIM)
+	draw_text(label, l.x, l.y + 5, 14, UI_TEXT_DIM)
 
 	// Value display + buttons on right side
 	right_x := l.x + l.w
@@ -171,7 +203,7 @@ ui_int_stepper :: proc(label: cstring, value: ^int, min_val, max_val, step: int)
 	plus_rect := rl.Rectangle{f32(right_x - btn_w), f32(l.y), f32(btn_w), f32(row_h)}
 	plus_hovered := rl.CheckCollisionPointRec(mouse, plus_rect) && active_dropdown == nil
 	rl.DrawRectangleRec(plus_rect, plus_hovered ? UI_WIDGET_HOVER : UI_WIDGET_BG)
-	rl.DrawText("+", right_x - btn_w + 9, l.y + 6, 14, UI_TEXT)
+	draw_text("+", right_x - btn_w + 9, l.y + 6, 14, UI_TEXT)
 	if plus_hovered && rl.IsMouseButtonPressed(.LEFT) {
 		value^ = min(max_val, value^ + step)
 		changed = true
@@ -179,15 +211,15 @@ ui_int_stepper :: proc(label: cstring, value: ^int, min_val, max_val, step: int)
 
 	// Value text
 	val_text := fmt.ctprintf("%d", value^)
-	val_w := rl.MeasureText(val_text, 14)
+	val_w := measure_text(val_text, 14)
 	val_x := right_x - btn_w - 8 - val_w
-	rl.DrawText(val_text, val_x, l.y + 6, 14, UI_TEXT)
+	draw_text(val_text, val_x, l.y + 6, 14, UI_TEXT)
 
 	// [-] button
 	minus_rect := rl.Rectangle{f32(val_x - 8 - btn_w), f32(l.y), f32(btn_w), f32(row_h)}
 	minus_hovered := rl.CheckCollisionPointRec(mouse, minus_rect) && active_dropdown == nil
 	rl.DrawRectangleRec(minus_rect, minus_hovered ? UI_WIDGET_HOVER : UI_WIDGET_BG)
-	rl.DrawText("-", val_x - 8 - btn_w + 10, l.y + 6, 14, UI_TEXT)
+	draw_text("-", val_x - 8 - btn_w + 10, l.y + 6, 14, UI_TEXT)
 	if minus_hovered && rl.IsMouseButtonPressed(.LEFT) {
 		value^ = max(min_val, value^ - step)
 		changed = true
@@ -206,7 +238,7 @@ ui_labeled_stepper :: proc(label: cstring, value: ^int, min_val, max_val, step: 
 	changed := false
 
 	// Label
-	rl.DrawText(label, l.x, l.y + 5, 14, UI_TEXT_DIM)
+	draw_text(label, l.x, l.y + 5, 14, UI_TEXT_DIM)
 
 	// Value display + buttons on right side
 	right_x := l.x + l.w
@@ -216,22 +248,22 @@ ui_labeled_stepper :: proc(label: cstring, value: ^int, min_val, max_val, step: 
 	plus_rect := rl.Rectangle{f32(right_x - btn_w), f32(l.y), f32(btn_w), f32(row_h)}
 	plus_hovered := rl.CheckCollisionPointRec(mouse, plus_rect) && active_dropdown == nil
 	rl.DrawRectangleRec(plus_rect, plus_hovered ? UI_WIDGET_HOVER : UI_WIDGET_BG)
-	rl.DrawText("+", right_x - btn_w + 9, l.y + 6, 14, UI_TEXT)
+	draw_text("+", right_x - btn_w + 9, l.y + 6, 14, UI_TEXT)
 	if plus_hovered && rl.IsMouseButtonPressed(.LEFT) {
 		value^ = min(max_val, value^ + step)
 		changed = true
 	}
 
 	// Display text (custom label instead of number)
-	val_w := rl.MeasureText(display_text, 14)
+	val_w := measure_text(display_text, 14)
 	val_x := right_x - btn_w - 8 - val_w
-	rl.DrawText(display_text, val_x, l.y + 6, 14, UI_TEXT)
+	draw_text(display_text, val_x, l.y + 6, 14, UI_TEXT)
 
 	// [-] button
 	minus_rect := rl.Rectangle{f32(val_x - 8 - btn_w), f32(l.y), f32(btn_w), f32(row_h)}
 	minus_hovered := rl.CheckCollisionPointRec(mouse, minus_rect) && active_dropdown == nil
 	rl.DrawRectangleRec(minus_rect, minus_hovered ? UI_WIDGET_HOVER : UI_WIDGET_BG)
-	rl.DrawText("-", val_x - 8 - btn_w + 10, l.y + 6, 14, UI_TEXT)
+	draw_text("-", val_x - 8 - btn_w + 10, l.y + 6, 14, UI_TEXT)
 	if minus_hovered && rl.IsMouseButtonPressed(.LEFT) {
 		value^ = max(min_val, value^ - step)
 		changed = true
@@ -251,9 +283,9 @@ ui_slider :: proc(label: cstring, value: ^f32, min_val, max_val: f32, fmt_str: s
 
 	// Label + value
 	val_text := fmt.ctprintf(fmt_str, value^)
-	rl.DrawText(label, l.x, l.y, 14, UI_TEXT_DIM)
-	val_w := rl.MeasureText(val_text, 14)
-	rl.DrawText(val_text, l.x + l.w - val_w, l.y, 14, UI_TEXT)
+	draw_text(label, l.x, l.y, 14, UI_TEXT_DIM)
+	val_w := measure_text(val_text, 14)
+	draw_text(val_text, l.x + l.w - val_w, l.y, 14, UI_TEXT)
 	l.y += row_h + 2
 
 	// Slider track
@@ -303,7 +335,7 @@ ui_toggle :: proc(label: cstring, value: ^bool) -> bool {
 	}
 
 	// Label
-	rl.DrawText(label, l.x + box_size + 8, l.y + 5, 14, UI_TEXT)
+	draw_text(label, l.x + box_size + 8, l.y + 5, 14, UI_TEXT)
 
 	if hovered && rl.IsMouseButtonPressed(.LEFT) {
 		value^ = !value^
@@ -325,7 +357,7 @@ ui_dropdown :: proc(label: cstring, options: []cstring, selected: ^int) -> bool 
 	is_open := active_dropdown == label
 
 	// Label
-	rl.DrawText(label, l.x, l.y, 14, UI_TEXT_DIM)
+	draw_text(label, l.x, l.y, 14, UI_TEXT_DIM)
 	l.y += 16
 
 	// Dropdown button
@@ -335,11 +367,11 @@ ui_dropdown :: proc(label: cstring, options: []cstring, selected: ^int) -> bool 
 
 	// Current value text
 	current_text: cstring = selected^ >= 0 && selected^ < len(options) ? options[selected^] : "---"
-	rl.DrawText(current_text, l.x + 8, l.y + 6, 14, UI_TEXT)
+	draw_text(current_text, l.x + 8, l.y + 6, 14, UI_TEXT)
 
 	// Arrow
 	arrow: cstring = is_open ? "^" : "v"
-	rl.DrawText(arrow, l.x + l.w - 18, l.y + 6, 14, UI_TEXT_DIM)
+	draw_text(arrow, l.x + l.w - 18, l.y + 6, 14, UI_TEXT_DIM)
 
 	// Toggle open/close
 	if btn_hovered && rl.IsMouseButtonPressed(.LEFT) {
@@ -392,12 +424,12 @@ ui_dropdown :: proc(label: cstring, options: []cstring, selected: ^int) -> bool 
 
 			if i32(selected^) == item_idx {
 				rl.DrawRectangleRec(opt_rect, UI_ACCENT)
-				rl.DrawText(options[item_idx], l.x + 8, opt_y + 6, 14, rl.Color{20, 20, 25, 255})
+				draw_text(options[item_idx], l.x + 8, opt_y + 6, 14, rl.Color{20, 20, 25, 255})
 			} else {
 				if opt_hovered {
 					rl.DrawRectangleRec(opt_rect, UI_WIDGET_HOVER)
 				}
-				rl.DrawText(options[item_idx], l.x + 8, opt_y + 6, 14, UI_TEXT)
+				draw_text(options[item_idx], l.x + 8, opt_y + 6, 14, UI_TEXT)
 			}
 
 			if opt_hovered && rl.IsMouseButtonPressed(.LEFT) {
@@ -412,11 +444,11 @@ ui_dropdown :: proc(label: cstring, options: []cstring, selected: ^int) -> bool 
 			indicator_color := rl.Color{180, 180, 200, 180}
 			if dropdown_scroll > 0 {
 				// Up arrow at top-right of list
-				rl.DrawText("^", l.x + l.w - 16, l.y + 2, 12, indicator_color)
+				draw_text("^", l.x + l.w - 16, l.y + 2, 12, indicator_color)
 			}
 			if dropdown_scroll < max_scroll {
 				// Down arrow at bottom-right of list
-				rl.DrawText("v", l.x + l.w - 16, l.y + list_h - 14, 12, indicator_color)
+				draw_text("v", l.x + l.w - 16, l.y + list_h - 14, 12, indicator_color)
 			}
 		}
 
@@ -492,6 +524,73 @@ ui_step_params :: proc(step: ^Gen_Step) {
 		// Max/Pair - show "No limit" when 0
 		max_label: cstring = step.connect_doors.max_per_pair == 0 ? "No limit" : fmt.ctprintf("%d", step.connect_doors.max_per_pair)
 		ui_labeled_stepper("Max/Pair", &step.connect_doors.max_per_pair, 0, 10, 1, max_label)
+	case .Place_Specific:
+		tmpl_idx := clamp(step.place_specific.template_index, 0, len(MODULE_TEMPLATES) - 1)
+		tmpl_name: cstring
+		switch tmpl_idx {
+		case 0: tmpl_name = "Small Room"
+		case 1: tmpl_name = "Large Room"
+		case 2: tmpl_name = "Long Hall"
+		case 3: tmpl_name = "L-Shape"
+		case 4: tmpl_name = "Cross"
+		case 5: tmpl_name = "Grand Hall"
+		case 6: tmpl_name = "Throne Room"
+		case:   tmpl_name = "Unknown"
+		}
+		ui_labeled_stepper("Template", &step.place_specific.template_index, 0, len(MODULE_TEMPLATES) - 1, 1, tmpl_name)
+		ui_int_stepper("X", &step.place_specific.x, 0, 128, 1)
+		ui_int_stepper("Y", &step.place_specific.y, 0, 128, 1)
+		rot_idx := clamp(step.place_specific.rotation, 0, 3)
+		rot_name: cstring
+		switch rot_idx {
+		case 0: rot_name = "0 deg"
+		case 1: rot_name = "90 deg"
+		case 2: rot_name = "180 deg"
+		case 3: rot_name = "270 deg"
+		case:   rot_name = "?"
+		}
+		ui_labeled_stepper("Rotation", &step.place_specific.rotation, 0, 3, 1, rot_name)
+	case .Mirror_Rooms:
+		axis_val := int(step.mirror_rooms.axis)
+		ui_labeled_stepper("Axis", &axis_val, 0, 1, 1, MIRROR_AXIS_NAMES[step.mirror_rooms.axis])
+		step.mirror_rooms.axis = Mirror_Axis(axis_val)
+		axis_label: cstring = step.mirror_rooms.axis_pos == 0 ? "Area center" : fmt.ctprintf("%d", step.mirror_rooms.axis_pos)
+		ui_labeled_stepper("Axis Pos", &step.mirror_rooms.axis_pos, 0, 128, 1, axis_label)
+	case .Place_Symmetric:
+		sym_val := int(step.place_symmetric.symmetry)
+		ui_labeled_stepper("Symmetry", &sym_val, 0, 3, 1, SYMMETRY_MODE_NAMES[step.place_symmetric.symmetry])
+		step.place_symmetric.symmetry = Symmetry_Mode(sym_val)
+		ax_label: cstring = step.place_symmetric.axis_x == 0 ? "Area ctr" : fmt.ctprintf("%d", step.place_symmetric.axis_x)
+		ui_labeled_stepper("Axis X", &step.place_symmetric.axis_x, 0, 128, 1, ax_label)
+		ay_label: cstring = step.place_symmetric.axis_y == 0 ? "Area ctr" : fmt.ctprintf("%d", step.place_symmetric.axis_y)
+		ui_labeled_stepper("Axis Y", &step.place_symmetric.axis_y, 0, 128, 1, ay_label)
+		max_label: cstring = step.place_symmetric.max_rooms == 0 ? "No limit" : fmt.ctprintf("%d", step.place_symmetric.max_rooms)
+		ui_labeled_stepper("Max Rooms", &step.place_symmetric.max_rooms, 0, 200, 5, max_label)
+	case .Place_Perimeter:
+		ui_slider("Gap Chance", &step.place_perimeter.gap_chance, 0.0, 0.5)
+		pmax_label: cstring = step.place_perimeter.max_rooms == 0 ? "No limit" : fmt.ctprintf("%d", step.place_perimeter.max_rooms)
+		ui_labeled_stepper("Max Rooms", &step.place_perimeter.max_rooms, 0, 200, 5, pmax_label)
+	case .Place_Along_Line:
+		ui_int_stepper("X1", &step.place_along_line.x1, 0, 128, 1)
+		ui_int_stepper("Y1", &step.place_along_line.y1, 0, 128, 1)
+		ui_int_stepper("X2", &step.place_along_line.x2, 0, 128, 1)
+		ui_int_stepper("Y2", &step.place_along_line.y2, 0, 128, 1)
+		side_name: cstring
+		switch step.place_along_line.door_side {
+		case 0: side_name = "Left"
+		case 1: side_name = "Right"
+		case:   side_name = "Both"
+		}
+		ui_labeled_stepper("Door Side", &step.place_along_line.door_side, 0, 2, 1, side_name)
+		ui_int_stepper("Spacing", &step.place_along_line.spacing, 0, 10, 1)
+	case .Fill_Area:
+		ui_int_stepper("Red", &step.fill_area.color_r, 0, 255, 10)
+		ui_int_stepper("Green", &step.fill_area.color_g, 0, 255, 10)
+		ui_int_stepper("Blue", &step.fill_area.color_b, 0, 255, 10)
+	case .Wall_Border:
+		ui_int_stepper("Thickness", &step.wall_border.thickness, 1, 5, 1)
+	case .Connect_Linear:
+		ui_slider("Manhattan", &step.connect_linear.manhattan_weight, 0.0, 1.0)
 	}
 
 	// Area constraint controls (for all steps except Define_Area)
@@ -525,13 +624,17 @@ ADD_STEP_OPTIONS := [?]cstring{
 	"Seed Rooms", "Grow Clusters", "Connect MST", "Mark Doors",
 	"Add Loops", "Widen Corridors", "BSP Partition", "Fill Dead Ends",
 	"Place Grid", "Room Corridor", "Define Area", "Pack Rooms",
-	"Join Rooms", "Connect Doors",
+	"Join Rooms", "Connect Doors", "Place Specific", "Mirror Rooms",
+	"Place Symmetric", "Place Perimeter", "Place Along Line",
+	"Fill Area", "Wall Border", "Connect Linear",
 }
 ADD_STEP_TYPES := [?]Step_Type{
 	.Seed_Rooms, .Grow_Clusters, .Connect_MST, .Mark_Doors,
 	.Add_Loops, .Widen_Corridors, .BSP_Partition, .Fill_Dead_Ends,
 	.Place_Grid, .Room_Corridor, .Define_Area, .Pack_Rooms,
-	.Join_Rooms, .Connect_Doors,
+	.Join_Rooms, .Connect_Doors, .Place_Specific, .Mirror_Rooms,
+	.Place_Symmetric, .Place_Perimeter, .Place_Along_Line,
+	.Fill_Area, .Wall_Border, .Connect_Linear,
 }
 
 draw_ui :: proc() {
@@ -552,7 +655,7 @@ draw_ui :: proc() {
 	}
 
 	// Title
-	rl.DrawText("Dungeon Generator", ui_layout.x, ui_layout.y, 18, rl.RAYWHITE)
+	draw_text("Dungeon Generator", ui_layout.x, ui_layout.y, 18, rl.RAYWHITE)
 	ui_layout.y += 26
 
 	// ---- Status section ----
@@ -585,10 +688,11 @@ draw_ui :: proc() {
 	if ui_dropdown("Preset", PRESET_NAMES[:], &preset_selected) {
 		recipe_destroy(&d.recipe)
 		d.recipe = preset_recipe_by_index(preset_selected)
-		// Reset expanded steps
+		// Reset expanded steps and scroll
 		for i in 0 ..< len(expanded_steps) {
 			expanded_steps[i] = false
 		}
+		step_list_scroll = 0
 	}
 
 	// Seed stepper (u64 displayed as int for stepper convenience)
@@ -599,11 +703,59 @@ draw_ui :: proc() {
 
 	ui_separator()
 
-	// Step list
+	// Step list (scrollable)
 	ui_label("Steps:", UI_TEXT_DIM)
 
 	remove_idx := -1  // index of step to remove (deferred)
 	swap_idx   := -1  // index of step to swap with the one below (deferred)
+
+	// Calculate available height for the step list: leave room for the
+	// Add Step controls, Display section, Actions section, and Controls help.
+	// Reserve ~380px for everything below the step list.
+	steps_max_h := screen_h - ui_layout.y - 380
+	if steps_max_h < 80 do steps_max_h = 80
+
+	// First pass: measure total content height by rendering into a virtual layout
+	step_list_start_y := ui_layout.y
+	{
+		measure_y: i32 = 0
+		row_h: i32 = 22
+		for si in 0 ..< len(d.recipe.steps) {
+			measure_y += row_h + 2
+			if si < len(expanded_steps) && expanded_steps[si] {
+				// Rough estimate: params take ~25px per widget, plus area controls
+				measure_y += 80  // conservative estimate per expanded step
+			}
+		}
+		step_list_content_h = measure_y
+	}
+
+	// Clamp scroll offset
+	scroll_max := step_list_content_h - steps_max_h
+	if scroll_max < 0 do scroll_max = 0
+	if step_list_scroll > scroll_max do step_list_scroll = scroll_max
+	if step_list_scroll < 0 do step_list_scroll = 0
+	needs_scroll := step_list_content_h > steps_max_h
+
+	// Mouse wheel scrolling over the step list area
+	step_list_rect := rl.Rectangle{f32(ui_layout.x), f32(step_list_start_y), f32(ui_layout.w), f32(steps_max_h)}
+	{
+		mouse := rl.GetMousePosition()
+		if rl.CheckCollisionPointRec(mouse, step_list_rect) && active_dropdown == nil {
+			wheel := rl.GetMouseWheelMove()
+			if wheel != 0 {
+				step_list_scroll -= i32(wheel * 20)
+				if step_list_scroll < 0 do step_list_scroll = 0
+				if step_list_scroll > scroll_max do step_list_scroll = scroll_max
+			}
+		}
+	}
+
+	// Begin scissor for step list
+	rl.BeginScissorMode(0, step_list_start_y, PANEL_WIDTH, steps_max_h)
+
+	// Offset layout by scroll
+	ui_layout.y -= step_list_scroll
 
 	for si in 0 ..< len(d.recipe.steps) {
 		step := &d.recipe.steps[si]
@@ -618,9 +770,12 @@ draw_ui :: proc() {
 		// Step number + type label (colored)
 		type_color := STEP_TYPE_COLORS[step.type]
 		step_label := fmt.ctprintf("%d. %s", si + 1, STEP_TYPE_NAMES[step.type])
-		rl.DrawText(step_label, l.x + 4, l.y + 4, 13, type_color)
+		draw_text(step_label, l.x + 4, l.y + 4, 13, type_color)
 
 		mouse := rl.GetMousePosition()
+
+		// Only process clicks if the row is within the visible area
+		row_visible := l.y + row_h > step_list_start_y && l.y < step_list_start_y + steps_max_h
 
 		// Right-side buttons: [^] [v] [X]
 		btn_sz: i32 = 20
@@ -628,38 +783,46 @@ draw_ui :: proc() {
 
 		// Remove button [X]
 		remove_x := l.x + l.w - btn_sz - 2
-		if ui_small_button(remove_x, btn_y, btn_sz, btn_sz, "X", UI_REMOVE_BG, UI_REMOVE_HOVER) {
+		if row_visible && ui_small_button(remove_x, btn_y, btn_sz, btn_sz, "X", UI_REMOVE_BG, UI_REMOVE_HOVER) {
 			remove_idx = si
+		} else if !row_visible {
+			rl.DrawRectangle(remove_x, btn_y, btn_sz, btn_sz, UI_REMOVE_BG)
 		}
 
 		// Move down [v]
 		down_x := remove_x - btn_sz - 2
 		if si < len(d.recipe.steps) - 1 {
-			if ui_small_button(down_x, btn_y, btn_sz, btn_sz, "v", UI_WIDGET_BG, UI_WIDGET_HOVER) {
+			if row_visible && ui_small_button(down_x, btn_y, btn_sz, btn_sz, "v", UI_WIDGET_BG, UI_WIDGET_HOVER) {
 				swap_idx = si // swap si with si+1
+			} else if !row_visible {
+				rl.DrawRectangle(down_x, btn_y, btn_sz, btn_sz, UI_WIDGET_BG)
 			}
 		} else {
 			rl.DrawRectangle(down_x, btn_y, btn_sz, btn_sz, UI_STEP_BG)
-			rl.DrawText("v", down_x + 5, btn_y + 4, 12, rl.Color{60, 60, 70, 255})
+			draw_text("v", down_x + 5, btn_y + 4, 12, rl.Color{60, 60, 70, 255})
 		}
 
 		// Move up [^]
 		up_x := down_x - btn_sz - 2
 		if si > 0 {
-			if ui_small_button(up_x, btn_y, btn_sz, btn_sz, "^", UI_WIDGET_BG, UI_WIDGET_HOVER) {
+			if row_visible && ui_small_button(up_x, btn_y, btn_sz, btn_sz, "^", UI_WIDGET_BG, UI_WIDGET_HOVER) {
 				swap_idx = si - 1 // swap si-1 with si
+			} else if !row_visible {
+				rl.DrawRectangle(up_x, btn_y, btn_sz, btn_sz, UI_WIDGET_BG)
 			}
 		} else {
 			rl.DrawRectangle(up_x, btn_y, btn_sz, btn_sz, UI_STEP_BG)
-			rl.DrawText("^", up_x + 5, btn_y + 4, 12, rl.Color{60, 60, 70, 255})
+			draw_text("^", up_x + 5, btn_y + 4, 12, rl.Color{60, 60, 70, 255})
 		}
 
 		// Expand/collapse toggle - click on the row (excluding the buttons)
-		buttons_w: i32 = (btn_sz + 2) * 3
-		row_rect := rl.Rectangle{f32(l.x), f32(l.y), f32(l.w - buttons_w), f32(row_h)}
-		if rl.CheckCollisionPointRec(mouse, row_rect) && rl.IsMouseButtonPressed(.LEFT) && active_dropdown == nil {
-			if si < len(expanded_steps) {
-				expanded_steps[si] = !expanded_steps[si]
+		if row_visible {
+			buttons_w: i32 = (btn_sz + 2) * 3
+			row_rect := rl.Rectangle{f32(l.x), f32(l.y), f32(l.w - buttons_w), f32(row_h)}
+			if rl.CheckCollisionPointRec(mouse, row_rect) && rl.IsMouseButtonPressed(.LEFT) && active_dropdown == nil {
+				if si < len(expanded_steps) {
+					expanded_steps[si] = !expanded_steps[si]
+				}
 			}
 		}
 
@@ -668,6 +831,22 @@ draw_ui :: proc() {
 		// Show params if expanded
 		if si < len(expanded_steps) && expanded_steps[si] {
 			ui_step_params(step)
+		}
+	}
+
+	rl.EndScissorMode()
+
+	// Restore layout Y to after the step list area
+	ui_layout.y = step_list_start_y + steps_max_h
+
+	// Draw scroll indicators
+	if needs_scroll {
+		indicator_color := rl.Color{180, 180, 200, 180}
+		if step_list_scroll > 0 {
+			draw_text("^ ^ ^", ui_layout.x + ui_layout.w / 2 - 18, step_list_start_y + 2, 10, indicator_color)
+		}
+		if step_list_scroll < scroll_max {
+			draw_text("v v v", ui_layout.x + ui_layout.w / 2 - 18, step_list_start_y + steps_max_h - 12, 10, indicator_color)
 		}
 	}
 
@@ -707,8 +886,8 @@ draw_ui :: proc() {
 	is_add_open := active_dropdown == "add_step"
 
 	rl.DrawRectangleRec(add_dd_rect, add_dd_hovered && !is_add_open ? UI_WIDGET_HOVER : UI_WIDGET_BG)
-	rl.DrawText(ADD_STEP_OPTIONS[add_step_type_selected], l.x + 6, l.y + 5, 12, UI_TEXT)
-	rl.DrawText(is_add_open ? "^" : "v", l.x + dropdown_w - 16, l.y + 5, 12, UI_TEXT_DIM)
+	draw_text(ADD_STEP_OPTIONS[add_step_type_selected], l.x + 6, l.y + 5, 12, UI_TEXT)
+	draw_text(is_add_open ? "^" : "v", l.x + dropdown_w - 16, l.y + 5, 12, UI_TEXT_DIM)
 
 	if add_dd_hovered && rl.IsMouseButtonPressed(.LEFT) {
 		if is_add_open {
@@ -761,6 +940,22 @@ draw_ui :: proc() {
 			// no params
 		case .Connect_Doors:
 			new_step.connect_doors = {mode = .Minimal, max_per_pair = 1}
+		case .Place_Specific:
+			new_step.place_specific = {template_index = 1, x = 30, y = 30, rotation = 0}
+		case .Mirror_Rooms:
+			new_step.mirror_rooms = {axis = .X, axis_pos = 0}
+		case .Place_Symmetric:
+			new_step.place_symmetric = {symmetry = .Mirror_X, axis_x = 0, axis_y = 0, max_rooms = 30}
+		case .Place_Perimeter:
+			new_step.place_perimeter = {gap_chance = 0.05, max_rooms = 0}
+		case .Place_Along_Line:
+			new_step.place_along_line = {x1 = 10, y1 = 32, x2 = 54, y2 = 32, door_side = 1, spacing = 0}
+		case .Fill_Area:
+			new_step.fill_area = {color_r = 120, color_g = 100, color_b = 70}
+		case .Wall_Border:
+			new_step.wall_border = {thickness = 2}
+		case .Connect_Linear:
+			new_step.connect_linear = {manhattan_weight = 0.8}
 		}
 		append(&d.recipe.steps, new_step)
 	}
@@ -797,10 +992,10 @@ draw_ui :: proc() {
 
 			if item_idx == add_step_type_selected {
 				rl.DrawRectangleRec(opt_rect, UI_ACCENT)
-				rl.DrawText(ADD_STEP_OPTIONS[item_idx], l.x + 6, opt_y + 5, 12, rl.Color{20, 20, 25, 255})
+				draw_text(ADD_STEP_OPTIONS[item_idx], l.x + 6, opt_y + 5, 12, rl.Color{20, 20, 25, 255})
 			} else {
 				rl.DrawRectangleRec(opt_rect, opt_hovered ? UI_WIDGET_HOVER : rl.Color{45, 45, 55, 250})
-				rl.DrawText(ADD_STEP_OPTIONS[item_idx], l.x + 6, opt_y + 5, 12, UI_TEXT)
+				draw_text(ADD_STEP_OPTIONS[item_idx], l.x + 6, opt_y + 5, 12, UI_TEXT)
 			}
 
 			if opt_hovered && rl.IsMouseButtonPressed(.LEFT) {
@@ -813,10 +1008,10 @@ draw_ui :: proc() {
 		if can_scroll {
 			indicator_color := rl.Color{180, 180, 200, 180}
 			if dropdown_scroll > 0 {
-				rl.DrawText("^", l.x + dropdown_w - 14, l.y + 2, 10, indicator_color)
+				draw_text("^", l.x + dropdown_w - 14, l.y + 2, 10, indicator_color)
 			}
 			if dropdown_scroll < max_scroll {
-				rl.DrawText("v", l.x + dropdown_w - 14, l.y + list_h - 12, 10, indicator_color)
+				draw_text("v", l.x + dropdown_w - 14, l.y + list_h - 12, 10, indicator_color)
 			}
 		}
 

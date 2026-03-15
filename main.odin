@@ -26,6 +26,10 @@ App_State :: struct {
 // Global state (accessible from ui.odin etc.)
 state: App_State
 
+// Custom UI font (loaded at startup)
+ui_font: rl.Font
+ui_font_loaded: bool
+
 // ---------------------------------------------------------------------------
 // Entry point
 // ---------------------------------------------------------------------------
@@ -41,6 +45,13 @@ main :: proc() {
 	rl.InitWindow(1280, 800, "Procedural Dungeon Generator")
 	defer rl.CloseWindow()
 	rl.SetTargetFPS(60)
+
+	// Load custom font (Arial) - must be after InitWindow
+	ui_font = rl.LoadFontEx("/System/Library/Fonts/Supplemental/Arial.ttf", 32, nil, 0)
+	if ui_font.texture.id > 0 {
+		ui_font_loaded = true
+		rl.SetTextureFilter(ui_font.texture, .BILINEAR)
+	}
 
 	state.dungeon = dungeon_create(config)
 	state.dungeon.recipe = recipe_classic_dungeon()
@@ -61,6 +72,9 @@ main :: proc() {
 	}
 
 	dungeon_destroy(&state.dungeon)
+	if ui_font_loaded {
+		rl.UnloadFont(ui_font)
+	}
 }
 
 // ---------------------------------------------------------------------------

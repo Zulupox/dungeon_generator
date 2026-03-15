@@ -391,3 +391,104 @@ door_neighbor :: proc(slot: Door_Slot, gx, gy: int) -> (int, int) {
 door_global :: proc(slot: Door_Slot, gx, gy: int) -> (int, int) {
 	return gx + slot.local_x, gy + slot.local_y
 }
+
+// ---------------------------------------------------------------------------
+// Mirror helpers
+// ---------------------------------------------------------------------------
+
+// Flip a mask along the given axis.
+// Mirror_Axis.X = flip horizontally (left/right), .Y = flip vertically (top/bottom).
+mirror_mask :: proc(src: []bool, w, h: int, axis: Mirror_Axis) -> [dynamic]bool {
+	result := make([dynamic]bool, w * h)
+	for ly in 0 ..< h {
+		for lx in 0 ..< w {
+			if !src[ly * w + lx] do continue
+			mx, my: int
+			switch axis {
+			case .X: mx = w - 1 - lx; my = ly
+			case .Y: mx = lx;          my = h - 1 - ly
+			}
+			result[my * w + mx] = true
+		}
+	}
+	return result
+}
+
+// Flip door positions and swap directions along the given axis.
+mirror_doors :: proc(src: []Door_Slot, w, h: int, axis: Mirror_Axis) -> [dynamic]Door_Slot {
+	result := make([dynamic]Door_Slot, 0, len(src))
+	for slot in src {
+		ms: Door_Slot
+		switch axis {
+		case .X:
+			ms.local_x = w - 1 - slot.local_x
+			ms.local_y = slot.local_y
+			switch slot.direction {
+			case .East:  ms.direction = .West
+			case .West:  ms.direction = .East
+			case .North: ms.direction = .North
+			case .South: ms.direction = .South
+			}
+		case .Y:
+			ms.local_x = slot.local_x
+			ms.local_y = h - 1 - slot.local_y
+			switch slot.direction {
+			case .North: ms.direction = .South
+			case .South: ms.direction = .North
+			case .East:  ms.direction = .East
+			case .West:  ms.direction = .West
+			}
+		}
+		append(&result, ms)
+	}
+	return result
+}
+
+// Stamp a module with pre-built mask and doors (for mirrored rooms).
+// The caller owns mask and doors — they are moved into the Placed_Module.
+stamp_module_raw :: proc(d: ^Dungeon, mask: [dynamic]bool, doors: [dynamic]Door_Slot,
+                         rw, rh, gx, gy: int, color: Color4, template_index: int) -> int {
+	module_id := len(d.modules)
+
+	// Compute center
+	count: f32 = 0
+	cx, cy: f32 = 0, 0
+	for ly in 0 ..< rh {
+		for lx in 0 ..< rw {
+			if !mask[ly * rw + lx] do continue
+			cx += f32(gx + lx) + 0.5
+			cy += f32(gy + ly) + 0.5
+			count += 1
+		}
+	}
+	if count > 0 {
+		cx /= count
+		cy /= count
+	}
+
+	append(&d.modules, Placed_Module{
+		template_index = template_index,
+		rotation       = .R0, // not meaningful for mirrored rooms
+		grid_x         = gx,
+		grid_y         = gy,
+		center_x       = cx,
+		center_y       = cy,
+		rot_width      = rw,
+		rot_height     = rh,
+		rot_mask       = mask,
+		rot_doors      = doors,
+	})
+
+	// Mark grid cells
+	for ly in 0 ..< rh {
+		for lx in 0 ..< rw {
+			if !mask[ly * rw + lx] do continue
+			cell := grid_get(d, gx + lx, gy + ly)
+			cell.cell_type = .Room
+			cell.module_id = module_id
+			cell.color = color
+		}
+	}
+
+	return module_id
+}

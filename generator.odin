@@ -4,6 +4,47 @@ import "core:math"
 import "core:math/rand"
 
 // ---------------------------------------------------------------------------
+// Room Group helpers
+// ---------------------------------------------------------------------------
+
+add_to_group :: proc(d: ^Dungeon, name: string, module_id: int) {
+	if len(name) == 0 do return
+	for &g in d.groups {
+		if g.name == name {
+			append(&g.module_ids, module_id)
+			return
+		}
+	}
+	g: Room_Group
+	g.name = name
+	append(&g.module_ids, module_id)
+	append(&d.groups, g)
+}
+
+get_group_modules :: proc(d: ^Dungeon, name: string) -> []int {
+	if len(name) == 0 do return nil
+	for &g in d.groups {
+		if g.name == name {
+			return g.module_ids[:]
+		}
+	}
+	return nil
+}
+
+is_in_group :: proc(d: ^Dungeon, name: string, module_id: int) -> bool {
+	mods := get_group_modules(d, name)
+	for mid in mods {
+		if mid == module_id do return true
+	}
+	return false
+}
+
+// Tag a newly placed module into the active group (set by dispatcher).
+tag_module_group :: proc(d: ^Dungeon, module_id: int) {
+	add_to_group(d, d.active_group, module_id)
+}
+
+// ---------------------------------------------------------------------------
 // Step Executors - called by the dispatcher in dungeon.odin
 // ---------------------------------------------------------------------------
 
@@ -106,7 +147,8 @@ place_random_room :: proc(d: ^Dungeon) -> bool {
 
 		if can_place_module(d, rot_mask[:], rmw, rmh, gx, gy) {
 			delete(rot_mask)
-			stamp_module(d, ti, gx, gy, rot)
+			new_idx := stamp_module(d, ti, gx, gy, rot)
+			tag_module_group(d, new_idx)
 			return true
 		}
 		delete(rot_mask)
@@ -188,6 +230,7 @@ grow_cluster :: proc(d: ^Dungeon, cluster: ^[dynamic]int) -> bool {
 			delete(rot_mask)
 			new_idx := stamp_module(d, ti, gx, gy, rot)
 			append(cluster, new_idx)
+			tag_module_group(d, new_idx)
 			return true
 		}
 		delete(rot_mask)
@@ -332,6 +375,11 @@ execute_connect_doors :: proc(d: ^Dungeon, params: ^Connect_Doors_Params) {
 	}
 
 	for mi in 0 ..< len(d.modules) {
+		// If source_group is active, only consider modules in that group
+		if len(d.active_source_group) > 0 {
+			if !is_in_group(d, d.active_source_group, mi) do continue
+		}
+
 		m := &d.modules[mi]
 		for di in 0 ..< len(m.rot_doors) {
 			slot := m.rot_doors[di]
@@ -346,6 +394,11 @@ execute_connect_doors :: proc(d: ^Dungeon, params: ^Connect_Doors_Params) {
 			ncell := d.grid[grid_index(d, nx, ny)]
 			if ncell.cell_type != .Room do continue
 			if ncell.module_id < 0 || ncell.module_id == mi do continue
+
+			// If source_group is active, neighbor must also be in the group
+			if len(d.active_source_group) > 0 {
+				if !is_in_group(d, d.active_source_group, ncell.module_id) do continue
+			}
 
 			// Check if the adjacent module has a matching door pointing back
 			adj := &d.modules[ncell.module_id]
@@ -501,6 +554,882 @@ execute_connect_doors :: proc(d: ^Dungeon, params: ^Connect_Doors_Params) {
 	}
 
 	d.step_done = true
+}
+
+// ---------------------------------------------------------------------------
+// Place_Specific - place a specific template at an exact position
+// ---------------------------------------------------------------------------
+
+execute_place_specific :: proc(d: ^Dungeon, params: ^Place_Specific_Params) {
+	ti := clamp(params.template_index, 0, len(MODULE_TEMPLATES) - 1)
+	rot := Rotation(clamp(params.rotation, 0, 3))
+	tmpl := &MODULE_TEMPLATES[ti]
+
+	rot_mask, rmw, rmh := build_rotated_mask(tmpl, rot)
+	defer delete(rot_mask)
+
+	if can_place_module(d, rot_mask[:], rmw, rmh, params.x, params.y) {
+		new_idx := stamp_module(d, ti, params.x, params.y, rot)
+		tag_module_group(d, new_idx)
+	}
+
+	d.step_done = true
+}
+
+// ---------------------------------------------------------------------------
+// Mirror_Rooms - duplicate rooms from source group across symmetry axis
+// ---------------------------------------------------------------------------
+
+execute_mirror_rooms :: proc(d: ^Dungeon, params: ^Mirror_Rooms_Params) {
+	source_ids := get_group_modules(d, d.active_source_group)
+	if len(source_ids) == 0 {
+		d.step_done = true
+		return
+	}
+
+	// Determine axis position: if 0 and an area is active, use area center
+	axis_pos := params.axis_pos
+	if axis_pos <= 0 && d.active_area_id >= 0 {
+		area := find_area_by_id(d, d.active_area_id)
+		if area != nil {
+			switch params.axis {
+			case .X: axis_pos = area.x + area.w / 2
+			case .Y: axis_pos = area.y + area.h / 2
+			}
+		}
+	}
+
+	// We need a local copy of source_ids because stamping new modules
+	// could potentially trigger group array reallocation if output_group
+	// is the same dynamic array. Copy the IDs to be safe.
+	src_copy := make([]int, len(source_ids))
+	for i in 0 ..< len(source_ids) {
+		src_copy[i] = source_ids[i]
+	}
+	defer delete(src_copy)
+
+	for src_id in src_copy {
+		if src_id < 0 || src_id >= len(d.modules) do continue
+		src := &d.modules[src_id]
+		tmpl := &MODULE_TEMPLATES[src.template_index]
+
+		// Compute mirrored position
+		mx, my: int
+		switch params.axis {
+		case .X:
+			mx = 2 * axis_pos - src.grid_x - src.rot_width
+			my = src.grid_y
+		case .Y:
+			mx = src.grid_x
+			my = 2 * axis_pos - src.grid_y - src.rot_height
+		}
+
+		// Build mirrored mask and doors from the source module's rot data
+		mirrored_mask := mirror_mask(src.rot_mask[:], src.rot_width, src.rot_height, params.axis)
+		mirrored_doors := mirror_doors(src.rot_doors[:], src.rot_width, src.rot_height, params.axis)
+
+		// Check if placement is valid
+		if !can_place_module(d, mirrored_mask[:], src.rot_width, src.rot_height, mx, my) {
+			delete(mirrored_mask)
+			delete(mirrored_doors)
+			continue
+		}
+
+		// Stamp the mirrored copy
+		new_idx := stamp_module_raw(d, mirrored_mask, mirrored_doors,
+		                             src.rot_width, src.rot_height, mx, my,
+		                             tmpl.color, src.template_index)
+
+		// Tag into output group
+		if len(params.output_group) > 0 {
+			add_to_group(d, params.output_group, new_idx)
+		}
+	}
+
+	d.step_done = true
+}
+
+// ---------------------------------------------------------------------------
+// Place_Symmetric - pack rooms with guaranteed symmetry
+// ---------------------------------------------------------------------------
+// Like Pack_Rooms, but each placement simultaneously stamps mirrored copies.
+// Supports Mirror_X, Mirror_Y, Mirror_XY (4 copies), and Rotate_4.
+// Each sub-step places one room + its mirror(s). Animated-friendly.
+
+place_symmetric_fail_count: int = 0
+
+execute_place_symmetric :: proc(d: ^Dungeon, params: ^Place_Symmetric_Params) {
+	num_templates := len(MODULE_TEMPLATES)
+
+	// Safety cap (counts primary rooms only)
+	if params.max_rooms > 0 && d.step_progress >= params.max_rooms {
+		d.step_done = true
+		place_symmetric_fail_count = 0
+		return
+	}
+
+	// Resolve axis position: 0 = use area center
+	axis_x := params.axis_x
+	axis_y := params.axis_y
+	if (axis_x <= 0 || axis_y <= 0) && d.active_area_id >= 0 {
+		area := find_area_by_id(d, d.active_area_id)
+		if area != nil {
+			if axis_x <= 0 do axis_x = area.x + area.w / 2
+			if axis_y <= 0 do axis_y = area.y + area.h / 2
+		}
+	}
+	// Fallback to grid center
+	if axis_x <= 0 do axis_x = d.config.grid_width / 2
+	if axis_y <= 0 do axis_y = d.config.grid_height / 2
+
+	// If no modules exist yet, place a seed room at/near the axis center
+	if len(d.modules) == 0 {
+		if place_random_room(d) {
+			d.step_progress += 1
+			place_symmetric_fail_count = 0
+		} else {
+			d.step_done = true
+			place_symmetric_fail_count = 0
+		}
+		return
+	}
+
+	// Collect open doors from existing modules
+	Open_Door :: struct {
+		module_idx: int,
+		door_idx:   int,
+	}
+
+	open_doors: [dynamic]Open_Door
+	defer delete(open_doors)
+
+	for mi in 0 ..< len(d.modules) {
+		m := &d.modules[mi]
+		for di in 0 ..< len(m.rot_doors) {
+			is_connected := false
+			for cd in m.connected_doors {
+				if cd == di { is_connected = true; break }
+			}
+			if is_connected do continue
+
+			door := m.rot_doors[di]
+			nx, ny := door_neighbor(door, m.grid_x, m.grid_y)
+			if !grid_in_bounds(d, nx, ny) do continue
+			if !grid_is_empty(d, nx, ny) do continue
+
+			append(&open_doors, Open_Door{module_idx = mi, door_idx = di})
+		}
+	}
+
+	if len(open_doors) == 0 {
+		d.step_done = true
+		place_symmetric_fail_count = 0
+		return
+	}
+
+	// Shuffle
+	for i := len(open_doors) - 1; i > 0; i -= 1 {
+		j := rand.int_max(i + 1)
+		open_doors[i], open_doors[j] = open_doors[j], open_doors[i]
+	}
+
+	// Try to place a room at an open door + all symmetric copies
+	for od in open_doors {
+		parent := &d.modules[od.module_idx]
+		door := parent.rot_doors[od.door_idx]
+		nx, ny := door_neighbor(door, parent.grid_x, parent.grid_y)
+		if !grid_is_empty(d, nx, ny) do continue
+
+		needed_dir := opposite_direction(door.direction)
+
+		TEMPLATE_RETRIES :: 15
+		for _ in 0 ..< TEMPLATE_RETRIES {
+			ti := rand.int_max(num_templates)
+			tmpl := &MODULE_TEMPLATES[ti]
+			rot := Rotation(rand.int_max(4))
+
+			rot_doors_tmp := build_rotated_doors(tmpl, rot)
+
+			// Find matching door
+			found_door := -1
+			for rdi in 0 ..< len(rot_doors_tmp) {
+				if rot_doors_tmp[rdi].direction == needed_dir {
+					found_door = rdi
+					break
+				}
+			}
+			if found_door == -1 {
+				delete(rot_doors_tmp)
+				continue
+			}
+
+			matching_door := rot_doors_tmp[found_door]
+			gx := nx - matching_door.local_x
+			gy := ny - matching_door.local_y
+			delete(rot_doors_tmp)
+
+			rot_mask, rmw, rmh := build_rotated_mask(tmpl, rot)
+
+			// Check primary placement
+			if !can_place_module(d, rot_mask[:], rmw, rmh, gx, gy) {
+				delete(rot_mask)
+				continue
+			}
+
+			// Compute mirrored positions and check all can be placed
+			Mirror_Copy :: struct {
+				mask:  [dynamic]bool,
+				doors: [dynamic]Door_Slot,
+				gx, gy: int,
+				rw, rh: int,
+			}
+
+			copies: [dynamic]Mirror_Copy
+			defer {
+				for &c in copies { delete(c.mask); delete(c.doors) }
+				delete(copies)
+			}
+
+			all_valid := true
+
+			switch params.symmetry {
+			case .Mirror_X:
+				mx := 2 * axis_x - gx - rmw
+				mm := mirror_mask(rot_mask[:], rmw, rmh, .X)
+				if can_place_module(d, mm[:], rmw, rmh, mx, gy) {
+					src_doors_x := build_rotated_doors(tmpl, rot)
+					md := mirror_doors(src_doors_x[:], rmw, rmh, .X)
+					delete(src_doors_x)
+					append(&copies, Mirror_Copy{mask = mm, doors = md, gx = mx, gy = gy, rw = rmw, rh = rmh})
+				} else {
+					delete(mm)
+					all_valid = false
+				}
+
+			case .Mirror_Y:
+				my := 2 * axis_y - gy - rmh
+				mm := mirror_mask(rot_mask[:], rmw, rmh, .Y)
+				if can_place_module(d, mm[:], rmw, rmh, gx, my) {
+					src_doors_y := build_rotated_doors(tmpl, rot)
+					md := mirror_doors(src_doors_y[:], rmw, rmh, .Y)
+					delete(src_doors_y)
+					append(&copies, Mirror_Copy{mask = mm, doors = md, gx = gx, gy = my, rw = rmw, rh = rmh})
+				} else {
+					delete(mm)
+					all_valid = false
+				}
+
+			case .Mirror_XY:
+				// 3 copies: mirror X, mirror Y, mirror both
+				mx := 2 * axis_x - gx - rmw
+				my := 2 * axis_y - gy - rmh
+
+				mm_x := mirror_mask(rot_mask[:], rmw, rmh, .X)
+				mm_y := mirror_mask(rot_mask[:], rmw, rmh, .Y)
+				mm_xy := mirror_mask(mm_x[:], rmw, rmh, .Y) // mirror X then Y = both
+
+				if can_place_module(d, mm_x[:], rmw, rmh, mx, gy) &&
+				   can_place_module(d, mm_y[:], rmw, rmh, gx, my) &&
+				   can_place_module(d, mm_xy[:], rmw, rmh, mx, my) {
+					src_doors := build_rotated_doors(tmpl, rot)
+					md_x := mirror_doors(src_doors[:], rmw, rmh, .X)
+					md_y := mirror_doors(src_doors[:], rmw, rmh, .Y)
+					md_xy := mirror_doors(md_x[:], rmw, rmh, .Y)
+					delete(src_doors)
+					append(&copies, Mirror_Copy{mask = mm_x, doors = md_x, gx = mx, gy = gy, rw = rmw, rh = rmh})
+					append(&copies, Mirror_Copy{mask = mm_y, doors = md_y, gx = gx, gy = my, rw = rmw, rh = rmh})
+					append(&copies, Mirror_Copy{mask = mm_xy, doors = md_xy, gx = mx, gy = my, rw = rmw, rh = rmh})
+				} else {
+					delete(mm_x)
+					delete(mm_y)
+					delete(mm_xy)
+					all_valid = false
+				}
+
+			case .Rotate_4:
+				// 3 copies: 90, 180, 270 degree rotation around (axis_x, axis_y)
+				// For each copy: rotate the offset vector and mirror/rotate the mask
+				// 90 CW:  (dx, dy) -> (-dy, dx)  — also need to rotate mask 90 CW
+				// 180:    (dx, dy) -> (-dx, -dy)  — rotate mask 180
+				// 270 CW: (dx, dy) -> (dy, -dx)   — rotate mask 270 CW
+
+				// Offset from axis to primary room center
+				pcx := gx + rmw / 2
+				pcy := gy + rmh / 2
+
+				Rot_Copy :: struct { angle: Rotation, cx, cy: int }
+				rot_copies := [?]Rot_Copy{
+					{.R90,  axis_x - (pcy - axis_y), axis_y + (pcx - axis_x)},
+					{.R180, axis_x - (pcx - axis_x), axis_y - (pcy - axis_y)},
+					{.R270, axis_x + (pcy - axis_y), axis_y - (pcx - axis_x)},
+				}
+
+				for rc in rot_copies {
+					// Build mask/doors with combined rotation
+					combined_rot := Rotation((int(rot) + int(rc.angle)) % 4)
+					cm, crw, crh := build_rotated_mask(tmpl, combined_rot)
+					cgx := rc.cx - crw / 2
+					cgy := rc.cy - crh / 2
+
+					if can_place_module(d, cm[:], crw, crh, cgx, cgy) {
+						cd := build_rotated_doors(tmpl, combined_rot)
+						append(&copies, Mirror_Copy{mask = cm, doors = cd, gx = cgx, gy = cgy, rw = crw, rh = crh})
+					} else {
+						delete(cm)
+						all_valid = false
+						break
+					}
+				}
+			}
+
+			if !all_valid {
+				delete(rot_mask)
+				continue
+			}
+
+			// All copies valid — stamp primary + mirrors
+			primary_idx := stamp_module(d, ti, gx, gy, rot)
+			tag_module_group(d, primary_idx)
+			delete(rot_mask)
+
+			for &c in copies {
+				copy_idx := stamp_module_raw(d, c.mask, c.doors, c.rw, c.rh, c.gx, c.gy,
+				                              tmpl.color, ti)
+				tag_module_group(d, copy_idx)
+				// Prevent defer from deleting mask/doors since stamp_module_raw took ownership
+				c.mask = {}
+				c.doors = {}
+			}
+
+			d.step_progress += 1
+			place_symmetric_fail_count = 0
+			return
+		}
+	}
+
+	// Full pass with zero placements
+	place_symmetric_fail_count += 1
+	if place_symmetric_fail_count >= 3 {
+		d.step_done = true
+		place_symmetric_fail_count = 0
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Place_Perimeter - place rooms around the edge of an area
+// ---------------------------------------------------------------------------
+// Walks clockwise around a rectangular area boundary, placing rooms flush
+// against each edge. Each room is oriented with a door facing inward.
+// Animated: places one room per sub-step.
+
+// File-scope: tracks perimeter walk position between sub-steps
+perimeter_positions: [dynamic][3]int  // [x, y, inward_direction_as_int]
+perimeter_pos_idx: int = 0
+perimeter_fail_count: int = 0
+
+execute_place_perimeter :: proc(d: ^Dungeon, params: ^Place_Perimeter_Params) {
+	num_templates := len(MODULE_TEMPLATES)
+
+	// Safety cap
+	if params.max_rooms > 0 && d.step_progress >= params.max_rooms {
+		d.step_done = true
+		perimeter_fail_count = 0
+		return
+	}
+
+	// On first call, build the list of perimeter positions (sequential, not shuffled)
+	if d.step_progress == 0 {
+		// Need an active area to know the perimeter
+		if d.active_area_id < 0 {
+			d.step_done = true
+			return
+		}
+		area := find_area_by_id(d, d.active_area_id)
+		if area == nil || area.shape != .Rectangle {
+			d.step_done = true
+			return
+		}
+
+		clear(&perimeter_positions)
+		perimeter_pos_idx = 0
+
+		ax := area.x
+		ay := area.y
+		aw := area.w
+		ah := area.h
+
+		// Walk clockwise sequentially — rooms pack tightly this way.
+		// Randomize just the starting corner.
+		start_edge := rand.int_max(4)
+
+		// Build all 4 edges in order starting from the random edge
+		for edge_offset in 0 ..< 4 {
+			edge := (start_edge + edge_offset) % 4
+			switch edge {
+			case 0: // Top edge: left to right, inward = South
+				for x in ax ..< ax + aw {
+					append(&perimeter_positions, [3]int{x, ay, 1})
+				}
+			case 1: // Right edge: top to bottom, inward = West
+				for y in ay + 1 ..< ay + ah {
+					append(&perimeter_positions, [3]int{ax + aw - 1, y, 3})
+				}
+			case 2: // Bottom edge: right to left, inward = North
+				for i in 1 ..< aw {
+					append(&perimeter_positions, [3]int{ax + aw - 1 - i, ay + ah - 1, 0})
+				}
+			case 3: // Left edge: bottom to top, inward = East
+				for i in 1 ..< ah - 1 {
+					append(&perimeter_positions, [3]int{ax, ay + ah - 1 - i, 2})
+				}
+			}
+		}
+	}
+
+	// Try to place a room at the next unoccupied perimeter position
+	for perimeter_pos_idx < len(perimeter_positions) {
+		pos := perimeter_positions[perimeter_pos_idx]
+		perimeter_pos_idx += 1
+
+		px := pos[0]
+		py := pos[1]
+		inward_dir_int := pos[2]
+
+		// Gap chance — skip this position randomly
+		if params.gap_chance > 0 && rand.float32() < params.gap_chance {
+			continue
+		}
+
+		// Skip if cell is already occupied (by a previously placed room)
+		if !grid_is_empty(d, px, py) do continue
+
+		inward_dir: Direction
+		switch inward_dir_int {
+		case 0: inward_dir = .North
+		case 1: inward_dir = .South
+		case 2: inward_dir = .East
+		case 3: inward_dir = .West
+		case:   inward_dir = .South
+		}
+
+		// Try to place a room here with a door facing inward.
+		// Try several random templates, but also always try the Small Room (template 0)
+		// as a fallback since it fits tightly.
+		RETRIES :: 12
+		for attempt in 0 ..< RETRIES {
+			ti: int
+			rot: Rotation
+			if attempt < RETRIES - 2 {
+				// Random template + rotation
+				ti = rand.int_max(num_templates)
+				rot = Rotation(rand.int_max(4))
+			} else {
+				// Last attempts: force Small Room (template 0) which fits in tight spots
+				ti = 0
+				rot = Rotation(rand.int_max(4))
+			}
+			tmpl := &MODULE_TEMPLATES[ti]
+
+			rot_doors := build_rotated_doors(tmpl, rot)
+
+			// Find a door facing inward on this template
+			found_door := -1
+			for rdi in 0 ..< len(rot_doors) {
+				if rot_doors[rdi].direction == inward_dir {
+					found_door = rdi
+					break
+				}
+			}
+			if found_door == -1 {
+				delete(rot_doors)
+				continue
+			}
+
+			// Position the room so the matching door cell lands on (px, py)
+			door_slot := rot_doors[found_door]
+			gx := px - door_slot.local_x
+			gy := py - door_slot.local_y
+			delete(rot_doors)
+
+			rot_mask, rmw, rmh := build_rotated_mask(tmpl, rot)
+
+			// Temporarily disable area constraint — perimeter rooms intentionally
+			// extend outside the area boundary (they sit on the edge).
+			saved_area := d.active_area_id
+			d.active_area_id = -1
+			can_place := can_place_module(d, rot_mask[:], rmw, rmh, gx, gy)
+			d.active_area_id = saved_area
+
+			if can_place {
+				delete(rot_mask)
+				new_idx := stamp_module(d, ti, gx, gy, rot)
+				tag_module_group(d, new_idx)
+				d.step_progress += 1
+				perimeter_fail_count = 0
+				return // one room per sub-step
+			}
+			delete(rot_mask)
+		}
+		// Couldn't place at this position, move to next
+	}
+
+	// First pass exhausted. Do a gap-fill pass: for each remaining empty
+	// perimeter cell, try placing a small room at various offsets so that
+	// any of the room's cells covers the gap (not requiring door alignment).
+	for &pos in perimeter_positions {
+		px := pos[0]
+		py := pos[1]
+		if !grid_is_empty(d, px, py) do continue
+
+		// Safety cap check
+		if params.max_rooms > 0 && d.step_progress >= params.max_rooms do break
+
+		// Try small templates at offsets where the room would cover (px, py)
+		gap_filled := false
+		GAP_RETRIES :: 20
+		for _ in 0 ..< GAP_RETRIES {
+			// Prefer small rooms for gap filling
+			ti := rand.int_max(3)  // templates 0-2 are the smallest (2x2, 3x3, 4x2)
+			tmpl := &MODULE_TEMPLATES[ti]
+			rot := Rotation(rand.int_max(4))
+			rw, rh := rotated_dims(tmpl.width, tmpl.height, rot)
+
+			// Try all offsets where (px, py) falls within the room
+			for oy in 0 ..< rh {
+				if gap_filled do break
+				for ox in 0 ..< rw {
+					gx := px - ox
+					gy := py - oy
+
+					rot_mask, rmw, rmh := build_rotated_mask(tmpl, rot)
+
+					saved_area := d.active_area_id
+					d.active_area_id = -1
+					can_place := can_place_module(d, rot_mask[:], rmw, rmh, gx, gy)
+					d.active_area_id = saved_area
+
+					if can_place {
+						delete(rot_mask)
+						new_idx := stamp_module(d, ti, gx, gy, rot)
+						tag_module_group(d, new_idx)
+						d.step_progress += 1
+						gap_filled = true
+						break
+					}
+					delete(rot_mask)
+				}
+			}
+			if gap_filled do break
+		}
+	}
+
+	d.step_done = true
+	perimeter_fail_count = 0
+	clear(&perimeter_positions)
+	perimeter_pos_idx = 0
+}
+
+// ---------------------------------------------------------------------------
+// Place_Along_Line - place rooms along a line between two points
+// ---------------------------------------------------------------------------
+// Walks from (x1,y1) to (x2,y2) and places rooms along the path.
+// door_side: 0 = left of travel, 1 = right of travel, 2 = both.
+// spacing: minimum gap cells between rooms (0 = tight pack).
+// One-shot step (places all rooms at once for simplicity).
+
+execute_place_along_line :: proc(d: ^Dungeon, params: ^Place_Along_Line_Params) {
+	num_templates := len(MODULE_TEMPLATES)
+
+	// Determine travel direction and perpendicular door direction(s)
+	dx := params.x2 - params.x1
+	dy := params.y2 - params.y1
+
+	// Primary travel axis: use the longer axis
+	horizontal := abs(dx) >= abs(dy)
+
+	// Door direction(s) perpendicular to travel
+	// For horizontal travel (East/West): doors face North (left) or South (right)
+	// For vertical travel (South/North): doors face West (left) or East (right)
+	door_dirs: [dynamic]Direction
+	defer delete(door_dirs)
+
+	if horizontal {
+		travel_sign := dx >= 0  // true = traveling East
+		switch params.door_side {
+		case 0: // left of travel
+			append(&door_dirs, travel_sign ? Direction.North : Direction.South)
+		case 1: // right of travel
+			append(&door_dirs, travel_sign ? Direction.South : Direction.North)
+		case: // both
+			append(&door_dirs, Direction.North)
+			append(&door_dirs, Direction.South)
+		}
+	} else {
+		travel_sign := dy >= 0  // true = traveling South
+		switch params.door_side {
+		case 0: // left of travel
+			append(&door_dirs, travel_sign ? Direction.East : Direction.West)
+		case 1: // right of travel
+			append(&door_dirs, travel_sign ? Direction.West : Direction.East)
+		case: // both
+			append(&door_dirs, Direction.East)
+			append(&door_dirs, Direction.West)
+		}
+	}
+
+	// Generate line positions using Bresenham-like stepping
+	Line_Pos :: struct { x, y: int }
+	positions: [dynamic]Line_Pos
+	defer delete(positions)
+
+	steps := max(abs(dx), abs(dy))
+	if steps == 0 {
+		append(&positions, Line_Pos{params.x1, params.y1})
+	} else {
+		for i in 0 ..= steps {
+			lx := params.x1 + dx * i / steps
+			ly := params.y1 + dy * i / steps
+			// Avoid duplicates
+			if len(positions) > 0 {
+				last := positions[len(positions) - 1]
+				if last.x == lx && last.y == ly do continue
+			}
+			append(&positions, Line_Pos{lx, ly})
+		}
+	}
+
+	// Walk positions and place rooms
+	skip_until := 0  // index to skip to (for spacing after placement)
+
+	for pi in 0 ..< len(positions) {
+		if pi < skip_until do continue
+
+		px := positions[pi].x
+		py := positions[pi].y
+
+		if !grid_is_empty(d, px, py) do continue
+
+		// Try to place a room with door facing the desired direction
+		placed := false
+		RETRIES :: 15
+		for attempt in 0 ..< RETRIES {
+			ti: int
+			rot: Rotation
+			if attempt < RETRIES - 2 {
+				ti = rand.int_max(num_templates)
+				rot = Rotation(rand.int_max(4))
+			} else {
+				// Fallback to small room
+				ti = 0
+				rot = Rotation(rand.int_max(4))
+			}
+			tmpl := &MODULE_TEMPLATES[ti]
+
+			rot_doors := build_rotated_doors(tmpl, rot)
+
+			// Find a door matching any of the desired directions
+			found_door := -1
+			for rdi in 0 ..< len(rot_doors) {
+				for dd in door_dirs {
+					if rot_doors[rdi].direction == dd {
+						found_door = rdi
+						break
+					}
+				}
+				if found_door >= 0 do break
+			}
+			if found_door == -1 {
+				delete(rot_doors)
+				continue
+			}
+
+			// Position room so (px, py) is within the room along the line edge
+			door_slot := rot_doors[found_door]
+			delete(rot_doors)
+
+			// Place room so the door cell lands on (px, py)
+			gx := px - door_slot.local_x
+			gy := py - door_slot.local_y
+
+			rot_mask, rmw, rmh := build_rotated_mask(tmpl, rot)
+
+			if can_place_module(d, rot_mask[:], rmw, rmh, gx, gy) {
+				delete(rot_mask)
+				new_idx := stamp_module(d, ti, gx, gy, rot)
+				tag_module_group(d, new_idx)
+
+				// Calculate how far along the line this room extends
+				// to skip ahead past it
+				extent: int
+				if horizontal {
+					extent = rmw
+				} else {
+					extent = rmh
+				}
+				skip_until = pi + extent + params.spacing
+				placed = true
+				break
+			}
+			delete(rot_mask)
+		}
+	}
+
+	d.step_done = true
+}
+
+// ---------------------------------------------------------------------------
+// Fill_Area - fill empty cells in an area with floor
+// ---------------------------------------------------------------------------
+// One-shot: marks all empty cells within the active area as Corridor type
+// with the specified color. Creates open courtyards/plazas.
+
+execute_fill_area :: proc(d: ^Dungeon, params: ^Fill_Area_Params) {
+	color := Color4{
+		u8(clamp(params.color_r, 0, 255)),
+		u8(clamp(params.color_g, 0, 255)),
+		u8(clamp(params.color_b, 0, 255)),
+		255,
+	}
+
+	for gy in 0 ..< d.config.grid_height {
+		for gx in 0 ..< d.config.grid_width {
+			if !cell_in_active_area(d, gx, gy) do continue
+			cell := grid_get(d, gx, gy)
+			if cell.cell_type == .Empty {
+				cell.cell_type = .Corridor
+				cell.module_id = -1
+				cell.color = color
+			}
+		}
+	}
+
+	d.step_done = true
+}
+
+// ---------------------------------------------------------------------------
+// Wall_Border - mark a border of cells around an area as room walls
+// ---------------------------------------------------------------------------
+// One-shot: marks cells along the inner edge of the active area as Room type.
+// Creates a solid wall ring without using module templates.
+// thickness: how many cells deep the border is.
+
+execute_wall_border :: proc(d: ^Dungeon, params: ^Wall_Border_Params) {
+	if d.active_area_id < 0 {
+		d.step_done = true
+		return
+	}
+	area := find_area_by_id(d, d.active_area_id)
+	if area == nil || area.shape != .Rectangle {
+		d.step_done = true
+		return
+	}
+
+	thickness := max(params.thickness, 1)
+	wall_color := Color4{100, 95, 85, 255}  // stone gray
+
+	for gy in area.y ..< area.y + area.h {
+		for gx in area.x ..< area.x + area.w {
+			if !grid_in_bounds(d, gx, gy) do continue
+
+			// Check if this cell is within 'thickness' of the area border
+			dist_left   := gx - area.x
+			dist_right  := (area.x + area.w - 1) - gx
+			dist_top    := gy - area.y
+			dist_bottom := (area.y + area.h - 1) - gy
+			min_dist := min(dist_left, dist_right, dist_top, dist_bottom)
+
+			if min_dist < thickness {
+				cell := grid_get(d, gx, gy)
+				if cell.cell_type == .Empty {
+					cell.cell_type = .Room
+					cell.module_id = -1  // no module — just wall cells
+					cell.color = wall_color
+				}
+			}
+		}
+	}
+
+	d.step_done = true
+}
+
+// ---------------------------------------------------------------------------
+// Connect_Linear - connect rooms in a group sequentially
+// ---------------------------------------------------------------------------
+// Takes rooms from source_group in the order they were added and connects
+// each pair (room[0] -> room[1] -> room[2] -> ...) with A* corridors.
+// This creates a clear progression path through the rooms.
+
+execute_connect_linear :: proc(d: ^Dungeon, params: ^Connect_Linear_Params) {
+	source_ids := get_group_modules(d, d.active_source_group)
+	if len(source_ids) < 2 {
+		d.step_done = true
+		return
+	}
+
+	// Sub-step 0: build corridor jobs for sequential pairs
+	if d.step_progress == 0 {
+		clear(&d.mst_edges)
+		for i in 0 ..< len(source_ids) - 1 {
+			ma := source_ids[i]
+			mb := source_ids[i + 1]
+			if ma < 0 || ma >= len(d.modules) do continue
+			if mb < 0 || mb >= len(d.modules) do continue
+
+			mod_a := &d.modules[ma]
+			mod_b := &d.modules[mb]
+
+			// Find the closest door pair between the two modules
+			best_dist := max(int)
+			best_ax, best_ay, best_bx, best_by: int
+
+			for di_a in 0 ..< len(mod_a.rot_doors) {
+				da := mod_a.rot_doors[di_a]
+				nax, nay := door_neighbor(da, mod_a.grid_x, mod_a.grid_y)
+
+				for di_b in 0 ..< len(mod_b.rot_doors) {
+					db := mod_b.rot_doors[di_b]
+					nbx, nby := door_neighbor(db, mod_b.grid_x, mod_b.grid_y)
+
+					dist := abs(nax - nbx) + abs(nay - nby)
+					if dist < best_dist {
+						best_dist = dist
+						best_ax = nax
+						best_ay = nay
+						best_bx = nbx
+						best_by = nby
+					}
+				}
+			}
+
+			if best_dist < max(int) {
+				append(&d.mst_edges, Corridor_Job{
+					from_module  = ma,
+					to_module    = mb,
+					from_door_gx = best_ax,
+					from_door_gy = best_ay,
+					to_door_gx   = best_bx,
+					to_door_gy   = best_by,
+				})
+			}
+		}
+		d.step_progress = 1
+		if len(d.mst_edges) == 0 {
+			d.step_done = true
+		}
+		return
+	}
+
+	// Subsequent sub-steps: lay one corridor each
+	corridor_idx := d.step_progress - 1
+	if corridor_idx < len(d.mst_edges) {
+		job := d.mst_edges[corridor_idx]
+		connect_rooms_astar(d, job, params.manhattan_weight)
+		d.step_progress += 1
+	}
+
+	if d.step_progress - 1 >= len(d.mst_edges) {
+		d.step_done = true
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -868,7 +1797,8 @@ place_room_in_region :: proc(d: ^Dungeon, target: Placement_Target) {
 
 		if can_place_module(d, rot_mask[:], rmw, rmh, gx, gy) {
 			delete(rot_mask)
-			stamp_module(d, ti, gx, gy, rot)
+			new_idx := stamp_module(d, ti, gx, gy, rot)
+			tag_module_group(d, new_idx)
 			return
 		}
 		delete(rot_mask)
@@ -1248,7 +2178,8 @@ try_place_chain_room :: proc(
 		// Place the room
 		delete(rot_mask)
 		delete(rot_doors)
-		stamp_module(d, ti, gx, gy, rot)
+		new_idx := stamp_module(d, ti, gx, gy, rot)
+		tag_module_group(d, new_idx)
 
 		return Chain_Place_Result{
 			success  = true,
@@ -1438,6 +2369,7 @@ execute_pack_rooms :: proc(d: ^Dungeon, params: ^Pack_Rooms_Params) {
 				}
 
 				if has_viable_door {
+					tag_module_group(d, new_idx)
 					d.step_progress += 1
 					pack_rooms_fail_count = 0
 					return // one room per sub-step (for animation)
