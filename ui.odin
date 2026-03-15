@@ -294,19 +294,29 @@ draw_ui :: proc() {
 				step := &d.recipe.steps[si]
 				imgui.PushIDInt(c.int(si))
 
-				is_active := !d.gen_done && si == d.current_step
-				type_color := rl_color_to_vec4(STEP_TYPE_COLORS[step.type])
-				label := fmt.ctprintf("%d. %s", si + 1, STEP_TYPE_NAMES[step.type])
+			is_active := !d.gen_done && si == d.current_step
+			type_color := rl_color_to_vec4(STEP_TYPE_COLORS[step.type])
+			if step.muted do type_color = {0.4, 0.4, 0.4, 0.5}
+			label := fmt.ctprintf("%d. %s", si + 1, STEP_TYPE_NAMES[step.type])
 
-				flags: imgui.TreeNodeFlags = {.OpenOnArrow, .SpanAvailWidth}
-				if is_active do flags |= {.Selected}
+			flags: imgui.TreeNodeFlags = {.OpenOnArrow, .SpanAvailWidth, .AllowOverlap}
+			if is_active do flags |= {.Selected}
 
-				imgui.PushStyleColorImVec4(.Text, type_color)
-				is_open := imgui.TreeNodeEx(label, flags)
-				imgui.PopStyleColor()
+			imgui.PushStyleColorImVec4(.Text, type_color)
+			is_open := imgui.TreeNodeEx(label, flags)
+			imgui.PopStyleColor()
 
-				imgui.SameLine(imgui.GetWindowWidth() - 75)
-				if si > 0 {
+			imgui.SameLine(imgui.GetWindowWidth() - 90)
+			was_muted := step.muted
+			if was_muted {
+				imgui.PushStyleColorImVec4(.Button, {0.6, 0.35, 0.1, 1.0})
+				imgui.PushStyleColorImVec4(.ButtonHovered, {0.7, 0.4, 0.15, 1.0})
+				imgui.PushStyleColorImVec4(.ButtonActive, {0.5, 0.3, 0.1, 1.0})
+			}
+			if imgui.SmallButton("M") do step.muted = !step.muted
+			if was_muted do imgui.PopStyleColor(3)
+			imgui.SameLine()
+			if si > 0 {
 					if imgui.SmallButton("^") do swap_idx = si - 1
 				} else {
 					imgui.SmallButton("^")

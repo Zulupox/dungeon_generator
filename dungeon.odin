@@ -308,6 +308,11 @@ dungeon_generate_step :: proc(d: ^Dungeon) {
 
 	step := &d.recipe.steps[d.current_step]
 
+	if step.muted {
+		d.step_done = true
+		return
+	}
+
 	// Set active area constraint from this step
 	d.active_area_id = step.area_id
 	d.active_area_exclude = step.area_exclude

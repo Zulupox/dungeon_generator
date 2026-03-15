@@ -235,6 +235,7 @@ Gen_Step :: struct {
 	// Area constraint: -1 = no constraint (whole grid), >= 0 = constrain to area
 	area_id:         int                   `json:"area_id"`,
 	area_exclude:    bool                  `json:"area_exclude"`,
+	muted:           bool                  `json:"muted"`,
 	// Group tagging
 	group:           string                `json:"group"`,
 	source_group:    string                `json:"source_group"`,
