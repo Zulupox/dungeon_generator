@@ -22,6 +22,7 @@ App_State :: struct {
 	gen_animated:      bool,
 	gen_step_timer:    f32,
 	show_ui:           bool,
+	canvas:            Canvas_State,
 }
 
 // Global state (accessible from ui.odin etc.)
@@ -57,6 +58,7 @@ main :: proc() {
 	state.gen_animated = false
 	gen_step_interval = 0.05
 	state.show_ui = true
+	state.canvas = Canvas_State{selected_step = -1, scroll_to_step = -1}
 
 	dungeon_generate_full(&state.dungeon)
 
@@ -126,6 +128,8 @@ update :: proc(dt: f32) {
 		}
 	}
 
+	canvas_update()
+
 	if !io.WantCaptureMouse {
 		switch state.camera_mode {
 		case .Top_Down:
@@ -158,6 +162,7 @@ draw :: proc() {
 	render_dungeon(&state.dungeon)
 	render_grid_outline(&state.dungeon)
 	render_areas(&state.dungeon)
+	canvas_render_3d(&state.dungeon)
 
 	rl.EndMode3D()
 
@@ -166,6 +171,8 @@ draw :: proc() {
 	if state.show_ui {
 		draw_ui()
 	}
+
+	canvas_draw_imgui()
 
 	imgui.Render()
 	imgui_rl.render_draw_data(imgui.GetDrawData())

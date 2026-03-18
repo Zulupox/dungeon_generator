@@ -848,12 +848,6 @@ execute_place_symmetric :: proc(d: ^Dungeon, params: ^Place_Symmetric_Params) {
 
 			case .Rotate_4:
 				// 3 copies: 90, 180, 270 degree rotation around (axis_x, axis_y)
-				// For each copy: rotate the offset vector and mirror/rotate the mask
-				// 90 CW:  (dx, dy) -> (-dy, dx)  — also need to rotate mask 90 CW
-				// 180:    (dx, dy) -> (-dx, -dy)  — rotate mask 180
-				// 270 CW: (dx, dy) -> (dy, -dx)   — rotate mask 270 CW
-
-				// Offset from axis to primary room center
 				pcx := gx + rmw / 2
 				pcy := gy + rmh / 2
 
@@ -865,7 +859,6 @@ execute_place_symmetric :: proc(d: ^Dungeon, params: ^Place_Symmetric_Params) {
 				}
 
 				for rc in rot_copies {
-					// Build mask/doors with combined rotation
 					combined_rot := Rotation((int(rot) + int(rc.angle)) % 4)
 					cm, crw, crh := build_rotated_mask(tmpl, combined_rot)
 					cgx := rc.cx - crw / 2
@@ -879,6 +872,50 @@ execute_place_symmetric :: proc(d: ^Dungeon, params: ^Place_Symmetric_Params) {
 						all_valid = false
 						break
 					}
+				}
+
+			case .Rotate_2:
+				// 1 copy: 180 degree rotation around (axis_x, axis_y)
+				pcx := gx + rmw / 2
+				pcy := gy + rmh / 2
+				tcx := 2 * axis_x - pcx
+				tcy := 2 * axis_y - pcy
+
+				combined_rot := Rotation((int(rot) + int(Rotation.R180)) % 4)
+				cm, crw, crh := build_rotated_mask(tmpl, combined_rot)
+				cgx := tcx - crw / 2
+				cgy := tcy - crh / 2
+
+				if can_place_module(d, cm[:], crw, crh, cgx, cgy) {
+					cd := build_rotated_doors(tmpl, combined_rot)
+					append(&copies, Mirror_Copy{mask = cm, doors = cd, gx = cgx, gy = cgy, rw = crw, rh = crh})
+				} else {
+					delete(cm)
+					all_valid = false
+				}
+
+			case .Mirror_Diagonal:
+				// 1 copy: reflection across the x=y diagonal through the axis
+				pcx := gx + rmw / 2
+				pcy := gy + rmh / 2
+				dx := pcx - axis_x
+				dy := pcy - axis_y
+				tcx := axis_x + dy
+				tcy := axis_y + dx
+
+				src_doors_d := build_rotated_doors(tmpl, rot)
+				tm, trw, trh := transpose_mask(rot_mask[:], rmw, rmh)
+				td := transpose_doors(src_doors_d[:], rmw, rmh)
+				delete(src_doors_d)
+				tgx := tcx - trw / 2
+				tgy := tcy - trh / 2
+
+				if can_place_module(d, tm[:], trw, trh, tgx, tgy) {
+					append(&copies, Mirror_Copy{mask = tm, doors = td, gx = tgx, gy = tgy, rw = trw, rh = trh})
+				} else {
+					delete(tm)
+					delete(td)
+					all_valid = false
 				}
 			}
 

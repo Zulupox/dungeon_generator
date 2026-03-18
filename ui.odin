@@ -163,7 +163,7 @@ ui_step_params :: proc(step: ^Gen_Step) {
 		ui_drag_int("Axis Pos", &step.mirror_rooms.axis_pos, 0, 128)
 	case .Place_Symmetric:
 		sym_val := c.int(step.place_symmetric.symmetry)
-		if imgui.Combo("Symmetry", &sym_val, "Mirror X\x00Mirror Y\x00Mirror XY\x00Rotate 4\x00\x00") {
+		if imgui.Combo("Symmetry", &sym_val, "Mirror X\x00Mirror Y\x00Mirror XY\x00Rotate 4\x00Rotate 2\x00Mirror Diagonal\x00\x00") {
 			step.place_symmetric.symmetry = Symmetry_Mode(sym_val)
 		}
 		ui_drag_int("Axis X", &step.place_symmetric.axis_x, 0, 128)
@@ -295,16 +295,26 @@ draw_ui :: proc() {
 				imgui.PushIDInt(c.int(si))
 
 			is_active := !d.gen_done && si == d.current_step
+			is_canvas_sel := si == state.canvas.scroll_to_step
 			type_color := rl_color_to_vec4(STEP_TYPE_COLORS[step.type])
 			if step.muted do type_color = {0.4, 0.4, 0.4, 0.5}
 			label := fmt.ctprintf("%d. %s", si + 1, STEP_TYPE_NAMES[step.type])
 
+			if is_canvas_sel {
+				imgui.SetNextItemOpen(true)
+			}
+
 			flags: imgui.TreeNodeFlags = {.OpenOnArrow, .SpanAvailWidth, .AllowOverlap}
-			if is_active do flags |= {.Selected}
+			if is_active || is_canvas_sel do flags |= {.Selected}
 
 			imgui.PushStyleColorImVec4(.Text, type_color)
 			is_open := imgui.TreeNodeEx(label, flags)
 			imgui.PopStyleColor()
+
+			if is_canvas_sel {
+				imgui.SetScrollHereY(0.5)
+				state.canvas.scroll_to_step = -1
+			}
 
 			imgui.SameLine(imgui.GetWindowWidth() - 90)
 			was_muted := step.muted

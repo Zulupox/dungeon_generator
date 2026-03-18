@@ -444,6 +444,38 @@ mirror_doors :: proc(src: []Door_Slot, w, h: int, axis: Mirror_Axis) -> [dynamic
 	return result
 }
 
+// Transpose a mask (reflect across the diagonal): w×h becomes h×w.
+transpose_mask :: proc(src: []bool, w, h: int) -> (result: [dynamic]bool, rw: int, rh: int) {
+	rw, rh = h, w
+	result = make([dynamic]bool, rw * rh)
+	for ly in 0 ..< h {
+		for lx in 0 ..< w {
+			if !src[ly * w + lx] do continue
+			result[lx * rw + ly] = true
+		}
+	}
+	return
+}
+
+// Transpose door positions and swap directions across the diagonal.
+// North <-> West, South <-> East (swapping the two axes).
+transpose_doors :: proc(src: []Door_Slot, w, h: int) -> [dynamic]Door_Slot {
+	result := make([dynamic]Door_Slot, 0, len(src))
+	for slot in src {
+		ms: Door_Slot
+		ms.local_x = slot.local_y
+		ms.local_y = slot.local_x
+		switch slot.direction {
+		case .North: ms.direction = .West
+		case .South: ms.direction = .East
+		case .East:  ms.direction = .South
+		case .West:  ms.direction = .North
+		}
+		append(&result, ms)
+	}
+	return result
+}
+
 // Stamp a module with pre-built mask and doors (for mirrored rooms).
 // The caller owns mask and doors — they are moved into the Placed_Module.
 stamp_module_raw :: proc(d: ^Dungeon, mask: [dynamic]bool, doors: [dynamic]Door_Slot,

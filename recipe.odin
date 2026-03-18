@@ -163,17 +163,21 @@ Mirror_Rooms_Params :: struct {
 }
 
 Symmetry_Mode :: enum {
-	Mirror_X,   // left/right mirror (vertical axis)
-	Mirror_Y,   // top/bottom mirror (horizontal axis)
-	Mirror_XY,  // both axes (4 copies total)
-	Rotate_4,   // 4-fold rotational symmetry (90 degree increments)
+	Mirror_X,         // left/right mirror (vertical axis)
+	Mirror_Y,         // top/bottom mirror (horizontal axis)
+	Mirror_XY,        // both axes (4 copies total)
+	Rotate_4,         // 4-fold rotational symmetry (90 degree increments)
+	Rotate_2,         // 2-fold rotational symmetry (180 degrees)
+	Mirror_Diagonal,  // reflection across the 45-degree diagonal (x=y through axis)
 }
 
 SYMMETRY_MODE_NAMES := [Symmetry_Mode]cstring{
-	.Mirror_X  = "Mirror X",
-	.Mirror_Y  = "Mirror Y",
-	.Mirror_XY = "Mirror XY",
-	.Rotate_4  = "Rotate 4",
+	.Mirror_X        = "Mirror X",
+	.Mirror_Y        = "Mirror Y",
+	.Mirror_XY       = "Mirror XY",
+	.Rotate_4        = "Rotate 4",
+	.Rotate_2        = "Rotate 2",
+	.Mirror_Diagonal = "Mirror Diagonal",
 }
 
 Place_Symmetric_Params :: struct {
