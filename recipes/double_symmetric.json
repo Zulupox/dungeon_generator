@@ -1,0 +1,600 @@
+{
+	"name": "Symmetric Castle",
+	"seed": 484099298548,
+	"steps": [
+		{
+			"type": "Define_Area",
+			"seed_rooms": {
+				"count": 0
+			},
+			"grow_clusters": {
+				"chance": 0.00000000,
+				"min_rooms": 0,
+				"max_rooms": 0
+			},
+			"connect_mst": {
+				"manhattan_weight": 0.00000000
+			},
+			"add_loops": {
+				"loop_chance": 0.00000000,
+				"max_extra": 0,
+				"manhattan_weight": 0.00000000
+			},
+			"widen_corridors": {
+				"width": 0
+			},
+			"bsp_partition": {
+				"min_size": 0,
+				"padding": 0
+			},
+			"fill_dead_ends": {
+				"iterations": 0
+			},
+			"place_grid": {
+				"cols": 0,
+				"rows": 0,
+				"jitter": 0.00000000
+			},
+			"room_corridor": {
+				"strictness": 0.00000000,
+				"manhattan_weight": 0.00000000,
+				"max_chain": 0
+			},
+			"define_area": {
+				"area_id": 0,
+				"shape": "Rectangle",
+				"x": 10,
+				"y": 10,
+				"w": 44,
+				"h": 44
+			},
+			"pack_rooms": {
+				"max_rooms": 0
+			},
+			"connect_doors": {
+				"mode": "All",
+				"max_per_pair": 0
+			},
+			"place_specific": {
+				"template_index": 0,
+				"x": 0,
+				"y": 0,
+				"rotation": 0
+			},
+			"mirror_rooms": {
+				"axis": "X",
+				"axis_pos": 0,
+				"output_group": ""
+			},
+			"place_symmetric": {
+				"symmetry": "Mirror_X",
+				"axis_x": 0,
+				"axis_y": 0,
+				"max_rooms": 0
+			},
+			"place_perimeter": {
+				"gap_chance": 0.00000000,
+				"max_rooms": 0
+			},
+			"place_along_line": {
+				"x1": 0,
+				"y1": 0,
+				"x2": 0,
+				"y2": 0,
+				"door_side": 0,
+				"spacing": 0
+			},
+			"fill_area": {
+				"color_r": 0,
+				"color_g": 0,
+				"color_b": 0
+			},
+			"wall_border": {
+				"thickness": 0
+			},
+			"connect_linear": {
+				"manhattan_weight": 0.00000000
+			},
+			"area_id": -1,
+			"area_exclude": false,
+			"muted": false,
+			"group": "",
+			"source_group": ""
+		},
+		{
+			"type": "Place_Specific",
+			"seed_rooms": {
+				"count": 0
+			},
+			"grow_clusters": {
+				"chance": 0.00000000,
+				"min_rooms": 0,
+				"max_rooms": 0
+			},
+			"connect_mst": {
+				"manhattan_weight": 0.00000000
+			},
+			"add_loops": {
+				"loop_chance": 0.00000000,
+				"max_extra": 0,
+				"manhattan_weight": 0.00000000
+			},
+			"widen_corridors": {
+				"width": 0
+			},
+			"bsp_partition": {
+				"min_size": 0,
+				"padding": 0
+			},
+			"fill_dead_ends": {
+				"iterations": 0
+			},
+			"place_grid": {
+				"cols": 0,
+				"rows": 0,
+				"jitter": 0.00000000
+			},
+			"room_corridor": {
+				"strictness": 0.00000000,
+				"manhattan_weight": 0.00000000,
+				"max_chain": 0
+			},
+			"define_area": {
+				"area_id": 0,
+				"shape": "Rectangle",
+				"x": 0,
+				"y": 0,
+				"w": 0,
+				"h": 0
+			},
+			"pack_rooms": {
+				"max_rooms": 0
+			},
+			"connect_doors": {
+				"mode": "All",
+				"max_per_pair": 0
+			},
+			"place_specific": {
+				"template_index": 5,
+				"x": 30,
+				"y": 30,
+				"rotation": 0
+			},
+			"mirror_rooms": {
+				"axis": "X",
+				"axis_pos": 0,
+				"output_group": ""
+			},
+			"place_symmetric": {
+				"symmetry": "Mirror_X",
+				"axis_x": 0,
+				"axis_y": 0,
+				"max_rooms": 0
+			},
+			"place_perimeter": {
+				"gap_chance": 0.00000000,
+				"max_rooms": 0
+			},
+			"place_along_line": {
+				"x1": 0,
+				"y1": 0,
+				"x2": 0,
+				"y2": 0,
+				"door_side": 0,
+				"spacing": 0
+			},
+			"fill_area": {
+				"color_r": 0,
+				"color_g": 0,
+				"color_b": 0
+			},
+			"wall_border": {
+				"thickness": 0
+			},
+			"connect_linear": {
+				"manhattan_weight": 0.00000000
+			},
+			"area_id": -1,
+			"area_exclude": false,
+			"muted": false,
+			"group": "keep",
+			"source_group": ""
+		},
+		{
+			"type": "Place_Symmetric",
+			"seed_rooms": {
+				"count": 0
+			},
+			"grow_clusters": {
+				"chance": 0.00000000,
+				"min_rooms": 0,
+				"max_rooms": 0
+			},
+			"connect_mst": {
+				"manhattan_weight": 0.00000000
+			},
+			"add_loops": {
+				"loop_chance": 0.00000000,
+				"max_extra": 0,
+				"manhattan_weight": 0.00000000
+			},
+			"widen_corridors": {
+				"width": 0
+			},
+			"bsp_partition": {
+				"min_size": 0,
+				"padding": 0
+			},
+			"fill_dead_ends": {
+				"iterations": 0
+			},
+			"place_grid": {
+				"cols": 0,
+				"rows": 0,
+				"jitter": 0.00000000
+			},
+			"room_corridor": {
+				"strictness": 0.00000000,
+				"manhattan_weight": 0.00000000,
+				"max_chain": 0
+			},
+			"define_area": {
+				"area_id": 0,
+				"shape": "Rectangle",
+				"x": 0,
+				"y": 0,
+				"w": 0,
+				"h": 0
+			},
+			"pack_rooms": {
+				"max_rooms": 0
+			},
+			"connect_doors": {
+				"mode": "All",
+				"max_per_pair": 0
+			},
+			"place_specific": {
+				"template_index": 0,
+				"x": 0,
+				"y": 0,
+				"rotation": 0
+			},
+			"mirror_rooms": {
+				"axis": "X",
+				"axis_pos": 0,
+				"output_group": ""
+			},
+			"place_symmetric": {
+				"symmetry": "Mirror_XY",
+				"axis_x": 0,
+				"axis_y": 0,
+				"max_rooms": 40
+			},
+			"place_perimeter": {
+				"gap_chance": 0.00000000,
+				"max_rooms": 0
+			},
+			"place_along_line": {
+				"x1": 0,
+				"y1": 0,
+				"x2": 0,
+				"y2": 0,
+				"door_side": 0,
+				"spacing": 0
+			},
+			"fill_area": {
+				"color_r": 0,
+				"color_g": 0,
+				"color_b": 0
+			},
+			"wall_border": {
+				"thickness": 0
+			},
+			"connect_linear": {
+				"manhattan_weight": 0.00000000
+			},
+			"area_id": 0,
+			"area_exclude": false,
+			"muted": false,
+			"group": "wings",
+			"source_group": ""
+		},
+		{
+			"type": "Define_Area",
+			"seed_rooms": {
+				"count": 0
+			},
+			"grow_clusters": {
+				"chance": 0.00000000,
+				"min_rooms": 0,
+				"max_rooms": 0
+			},
+			"connect_mst": {
+				"manhattan_weight": 0.00000000
+			},
+			"add_loops": {
+				"loop_chance": 0.00000000,
+				"max_extra": 0,
+				"manhattan_weight": 0.00000000
+			},
+			"widen_corridors": {
+				"width": 0
+			},
+			"bsp_partition": {
+				"min_size": 0,
+				"padding": 0
+			},
+			"fill_dead_ends": {
+				"iterations": 0
+			},
+			"place_grid": {
+				"cols": 0,
+				"rows": 0,
+				"jitter": 0.00000000
+			},
+			"room_corridor": {
+				"strictness": 0.00000000,
+				"manhattan_weight": 0.00000000,
+				"max_chain": 0
+			},
+			"define_area": {
+				"area_id": 1,
+				"shape": "Rectangle",
+				"x": 56,
+				"y": 57,
+				"w": 35,
+				"h": 29
+			},
+			"pack_rooms": {
+				"max_rooms": 0
+			},
+			"connect_doors": {
+				"mode": "All",
+				"max_per_pair": 0
+			},
+			"place_specific": {
+				"template_index": 0,
+				"x": 0,
+				"y": 0,
+				"rotation": 0
+			},
+			"mirror_rooms": {
+				"axis": "X",
+				"axis_pos": 0,
+				"output_group": ""
+			},
+			"place_symmetric": {
+				"symmetry": "Mirror_X",
+				"axis_x": 0,
+				"axis_y": 0,
+				"max_rooms": 0
+			},
+			"place_perimeter": {
+				"gap_chance": 0.00000000,
+				"max_rooms": 0
+			},
+			"place_along_line": {
+				"x1": 0,
+				"y1": 0,
+				"x2": 0,
+				"y2": 0,
+				"door_side": 0,
+				"spacing": 0
+			},
+			"fill_area": {
+				"color_r": 0,
+				"color_g": 0,
+				"color_b": 0
+			},
+			"wall_border": {
+				"thickness": 0
+			},
+			"connect_linear": {
+				"manhattan_weight": 0.00000000
+			},
+			"area_id": -1,
+			"area_exclude": false,
+			"muted": false,
+			"group": "",
+			"source_group": ""
+		},
+		{
+			"type": "Place_Symmetric",
+			"seed_rooms": {
+				"count": 0
+			},
+			"grow_clusters": {
+				"chance": 0.00000000,
+				"min_rooms": 0,
+				"max_rooms": 0
+			},
+			"connect_mst": {
+				"manhattan_weight": 0.00000000
+			},
+			"add_loops": {
+				"loop_chance": 0.00000000,
+				"max_extra": 0,
+				"manhattan_weight": 0.00000000
+			},
+			"widen_corridors": {
+				"width": 0
+			},
+			"bsp_partition": {
+				"min_size": 0,
+				"padding": 0
+			},
+			"fill_dead_ends": {
+				"iterations": 0
+			},
+			"place_grid": {
+				"cols": 0,
+				"rows": 0,
+				"jitter": 0.00000000
+			},
+			"room_corridor": {
+				"strictness": 0.00000000,
+				"manhattan_weight": 0.00000000,
+				"max_chain": 0
+			},
+			"define_area": {
+				"area_id": 0,
+				"shape": "Rectangle",
+				"x": 0,
+				"y": 0,
+				"w": 0,
+				"h": 0
+			},
+			"pack_rooms": {
+				"max_rooms": 0
+			},
+			"connect_doors": {
+				"mode": "All",
+				"max_per_pair": 0
+			},
+			"place_specific": {
+				"template_index": 0,
+				"x": 0,
+				"y": 0,
+				"rotation": 0
+			},
+			"mirror_rooms": {
+				"axis": "X",
+				"axis_pos": 0,
+				"output_group": ""
+			},
+			"place_symmetric": {
+				"symmetry": "Mirror_X",
+				"axis_x": 0,
+				"axis_y": 0,
+				"max_rooms": 30
+			},
+			"place_perimeter": {
+				"gap_chance": 0.00000000,
+				"max_rooms": 0
+			},
+			"place_along_line": {
+				"x1": 0,
+				"y1": 0,
+				"x2": 0,
+				"y2": 0,
+				"door_side": 0,
+				"spacing": 0
+			},
+			"fill_area": {
+				"color_r": 0,
+				"color_g": 0,
+				"color_b": 0
+			},
+			"wall_border": {
+				"thickness": 0
+			},
+			"connect_linear": {
+				"manhattan_weight": 0.00000000
+			},
+			"area_id": 1,
+			"area_exclude": false,
+			"muted": false,
+			"group": "",
+			"source_group": ""
+		},
+		{
+			"type": "Connect_Doors",
+			"seed_rooms": {
+				"count": 0
+			},
+			"grow_clusters": {
+				"chance": 0.00000000,
+				"min_rooms": 0,
+				"max_rooms": 0
+			},
+			"connect_mst": {
+				"manhattan_weight": 0.00000000
+			},
+			"add_loops": {
+				"loop_chance": 0.00000000,
+				"max_extra": 0,
+				"manhattan_weight": 0.00000000
+			},
+			"widen_corridors": {
+				"width": 0
+			},
+			"bsp_partition": {
+				"min_size": 0,
+				"padding": 0
+			},
+			"fill_dead_ends": {
+				"iterations": 0
+			},
+			"place_grid": {
+				"cols": 0,
+				"rows": 0,
+				"jitter": 0.00000000
+			},
+			"room_corridor": {
+				"strictness": 0.00000000,
+				"manhattan_weight": 0.00000000,
+				"max_chain": 0
+			},
+			"define_area": {
+				"area_id": 0,
+				"shape": "Rectangle",
+				"x": 0,
+				"y": 0,
+				"w": 0,
+				"h": 0
+			},
+			"pack_rooms": {
+				"max_rooms": 0
+			},
+			"connect_doors": {
+				"mode": "All",
+				"max_per_pair": 1
+			},
+			"place_specific": {
+				"template_index": 0,
+				"x": 0,
+				"y": 0,
+				"rotation": 0
+			},
+			"mirror_rooms": {
+				"axis": "X",
+				"axis_pos": 0,
+				"output_group": ""
+			},
+			"place_symmetric": {
+				"symmetry": "Mirror_X",
+				"axis_x": 0,
+				"axis_y": 0,
+				"max_rooms": 0
+			},
+			"place_perimeter": {
+				"gap_chance": 0.00000000,
+				"max_rooms": 0
+			},
+			"place_along_line": {
+				"x1": 0,
+				"y1": 0,
+				"x2": 0,
+				"y2": 0,
+				"door_side": 0,
+				"spacing": 0
+			},
+			"fill_area": {
+				"color_r": 0,
+				"color_g": 0,
+				"color_b": 0
+			},
+			"wall_border": {
+				"thickness": 0
+			},
+			"connect_linear": {
+				"manhattan_weight": 0.00000000
+			},
+			"area_id": -1,
+			"area_exclude": false,
+			"muted": false,
+			"group": "",
+			"source_group": ""
+		}
+	]
+}

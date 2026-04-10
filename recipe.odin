@@ -32,6 +32,7 @@ Step_Type :: enum {
 	Fill_Area,
 	Wall_Border,
 	Connect_Linear,
+	Define_Palette,
 }
 
 STEP_TYPE_NAMES := [Step_Type]cstring{
@@ -57,6 +58,7 @@ STEP_TYPE_NAMES := [Step_Type]cstring{
 	.Fill_Area        = "Fill Area",
 	.Wall_Border      = "Wall Border",
 	.Connect_Linear   = "Connect Linear",
+	.Define_Palette   = "Define Palette",
 }
 
 Seed_Rooms_Params :: struct {
@@ -211,6 +213,19 @@ Connect_Linear_Params :: struct {
 	manhattan_weight: f32,  // A* corridor style (0.0 = organic, 1.0 = straight)
 }
 
+// Define_Palette configures the room type adjacency rules and budgets.
+// When this step runs, it sets the active palette on the Dungeon.
+// If use_defaults is true, it loads the built-in castle adjacency rules.
+Define_Palette_Params :: struct {
+	use_defaults: bool,  // true = load built-in default adjacency rules + quotas
+	// Per-type quotas (used when use_defaults is false or to override defaults)
+	// Encoded as parallel arrays for JSON-friendliness
+	quota_types:      [16]Room_Type,  // room types for quotas
+	quota_max_counts: [16]int,        // max count per type (0 = unlimited)
+	quota_weights:    [16]f32,        // relative weight per type (0 = use default 1.0)
+	num_quotas:       int,            // how many entries are valid
+}
+
 // Gen_Step uses a flat struct with all param fields.
 // Only the fields relevant to the step type are used.
 // This makes JSON serialization straightforward.
@@ -236,6 +251,7 @@ Gen_Step :: struct {
 	fill_area:        Fill_Area_Params        `json:"fill_area"`,
 	wall_border:      Wall_Border_Params      `json:"wall_border"`,
 	connect_linear:   Connect_Linear_Params   `json:"connect_linear"`,
+	define_palette:   Define_Palette_Params   `json:"define_palette"`,
 	// Area constraint: -1 = no constraint (whole grid), >= 0 = constrain to area
 	area_id:         int                   `json:"area_id"`,
 	area_exclude:    bool                  `json:"area_exclude"`,
@@ -440,6 +456,12 @@ recipe_symmetric_castle :: proc() -> Recipe {
 	r.name = "Symmetric Castle"
 	r.seed = 0
 	s: Gen_Step
+	// Enable castle room palette with adjacency rules
+	s = make_step(.Define_Palette);   s.define_palette = {use_defaults = true, num_quotas = 3,
+		quota_types      = {0 = .Throne_Room, 1 = .Great_Hall, 2 = .Treasury},
+		quota_max_counts = {0 = 1, 1 = 2, 2 = 2},
+		quota_weights    = {0 = 1.0, 1 = 1.5, 2 = 0.5},
+	};  append(&r.steps, s)
 	// Full castle area (centered on 64x64 grid)
 	s = make_step(.Define_Area);      s.define_area = {area_id = 0, shape = .Rectangle, x = 10, y = 10, w = 44, h = 44};   append(&r.steps, s)
 	// Place a large central keep (Grand Hall, template 5)
@@ -456,6 +478,12 @@ recipe_walled_fortress :: proc() -> Recipe {
 	r.name = "Walled Fortress"
 	r.seed = 0
 	s: Gen_Step
+	// Enable castle room palette
+	s = make_step(.Define_Palette);    s.define_palette = {use_defaults = true, num_quotas = 5,
+		quota_types      = {0 = .Throne_Room, 1 = .Guard_Room, 2 = .Barracks, 3 = .Armory, 4 = .Treasury},
+		quota_max_counts = {0 = 1, 1 = 4, 2 = 4, 3 = 2, 4 = 1},
+		quota_weights    = {0 = 1.0, 1 = 2.0, 2 = 2.0, 3 = 1.0, 4 = 0.3},
+	};  append(&r.steps, s)
 	// Outer wall area
 	s = make_step(.Define_Area);       s.define_area = {area_id = 0, shape = .Rectangle, x = 8, y = 8, w = 48, h = 48};    append(&r.steps, s)
 	// Inner courtyard area (smaller, for interior rooms later)
@@ -553,6 +581,7 @@ PRESET_NAMES := [?]cstring{
 	"Castle Courtyard",
 	"Fortified Temple",
 	"Temple Progression",
+	"Royal Castle",
 }
 
 recipe_garrison_compound :: proc() -> Recipe {
@@ -577,6 +606,43 @@ recipe_garrison_compound :: proc() -> Recipe {
 	return r
 }
 
+// Royal Castle - full showcase of the palette system with distinct functional zones.
+// Throne room at center, guard rooms at gates, kitchens near dining halls,
+// treasury protected by guards, bedrooms in a quiet wing.
+recipe_royal_castle :: proc() -> Recipe {
+	r: Recipe
+	r.name = "Royal Castle"
+	r.seed = 0
+	s: Gen_Step
+
+	// Enable castle palette with strict budgets
+	s = make_step(.Define_Palette);    s.define_palette = {use_defaults = true, num_quotas = 10,
+		quota_types      = {0 = .Throne_Room, 1 = .Great_Hall, 2 = .Guard_Room, 3 = .Barracks, 4 = .Armory, 5 = .Kitchen, 6 = .Dining_Hall, 7 = .Treasury, 8 = .Chapel, 9 = .Bedroom},
+		quota_max_counts = {0 = 1, 1 = 1, 2 = 4, 3 = 3, 4 = 2, 5 = 1, 6 = 1, 7 = 1, 8 = 1, 9 = 4},
+		quota_weights    = {0 = 0.5, 1 = 1.0, 2 = 2.0, 3 = 1.5, 4 = 1.0, 5 = 1.0, 6 = 1.0, 7 = 0.3, 8 = 0.8, 9 = 1.5},
+	};  append(&r.steps, s)
+
+	// Full castle area
+	s = make_step(.Define_Area);       s.define_area = {area_id = 0, shape = .Rectangle, x = 6, y = 6, w = 52, h = 52};    append(&r.steps, s)
+
+	// Place perimeter walls with guard rooms
+	s = make_step(.Place_Perimeter);   s.place_perimeter = {gap_chance = 0.08, max_rooms = 0}; s.area_id = 0; s.group = "walls";  append(&r.steps, s)
+
+	// Central keep (Throne Room, template 6)
+	s = make_step(.Place_Specific);    s.place_specific = {template_index = 6, x = 29, y = 28, rotation = 0}; s.group = "keep";  append(&r.steps, s)
+
+	// Inner area for functional rooms
+	s = make_step(.Define_Area);       s.define_area = {area_id = 1, shape = .Rectangle, x = 14, y = 14, w = 36, h = 36};  append(&r.steps, s)
+
+	// Pack interior with typed rooms (adjacency rules ensure logical layout)
+	s = make_step(.Pack_Rooms);        s.pack_rooms = {max_rooms = 25}; s.area_id = 1; s.group = "interior";                append(&r.steps, s)
+
+	// Connect all adjacent doors
+	s = make_step(.Connect_Doors);     s.connect_doors = {mode = .All, max_per_pair = 1};                                    append(&r.steps, s)
+
+	return r
+}
+
 preset_recipe_by_index :: proc(index: int) -> Recipe {
 	switch index {
 	case 0:  return recipe_classic_dungeon()
@@ -596,6 +662,7 @@ preset_recipe_by_index :: proc(index: int) -> Recipe {
 	case 14: return recipe_castle_courtyard()
 	case 15: return recipe_fortified_temple()
 	case 16: return recipe_temple_progression()
+	case 17: return recipe_royal_castle()
 	}
 	return recipe_classic_dungeon()
 }
@@ -628,8 +695,10 @@ Json_Step :: struct {
 	fill_area:        Fill_Area_Params        `json:"fill_area"`,
 	wall_border:      Wall_Border_Params      `json:"wall_border"`,
 	connect_linear:   Connect_Linear_Params   `json:"connect_linear"`,
+	define_palette:   Define_Palette_Params   `json:"define_palette"`,
 	area_id:         int                   `json:"area_id"`,
 	area_exclude:    bool                  `json:"area_exclude"`,
+	muted:           bool                  `json:"muted"`,
 	group:           string                `json:"group"`,
 	source_group:    string                `json:"source_group"`,
 }
@@ -664,6 +733,7 @@ step_type_to_string :: proc(t: Step_Type) -> string {
 	case .Fill_Area:        return "Fill_Area"
 	case .Wall_Border:      return "Wall_Border"
 	case .Connect_Linear:   return "Connect_Linear"
+	case .Define_Palette:   return "Define_Palette"
 	}
 	return "Unknown"
 }
@@ -692,6 +762,7 @@ string_to_step_type :: proc(s: string) -> (Step_Type, bool) {
 	case "Fill_Area":        return .Fill_Area, true
 	case "Wall_Border":      return .Wall_Border, true
 	case "Connect_Linear":   return .Connect_Linear, true
+	case "Define_Palette":   return .Define_Palette, true
 	}
 	return .Seed_Rooms, false
 }
@@ -725,8 +796,10 @@ recipe_save :: proc(recipe: ^Recipe, filepath: string) -> bool {
 			fill_area        = s.fill_area,
 			wall_border      = s.wall_border,
 			connect_linear   = s.connect_linear,
+			define_palette   = s.define_palette,
 			area_id         = s.area_id,
 			area_exclude    = s.area_exclude,
+			muted           = s.muted,
 			group           = s.group,
 			source_group    = s.source_group,
 		}
@@ -789,8 +862,10 @@ recipe_load :: proc(filepath: string) -> (Recipe, bool) {
 			fill_area        = js.fill_area,
 			wall_border      = js.wall_border,
 			connect_linear   = js.connect_linear,
+			define_palette   = js.define_palette,
 			area_id         = js.area_id,
 			area_exclude    = js.area_exclude,
+			muted           = js.muted,
 			group           = js.group,
 			source_group    = js.source_group,
 		})
@@ -813,4 +888,43 @@ recipe_load :: proc(filepath: string) -> (Recipe, bool) {
 	}
 
 	return r, true
+}
+
+// ---------------------------------------------------------------------------
+// Recipes directory and file listing
+// ---------------------------------------------------------------------------
+
+RECIPES_DIR :: "recipes"
+
+// Ensure the recipes directory exists; create it if it doesn't.
+recipes_ensure_dir :: proc() {
+	if !os.exists(RECIPES_DIR) {
+		os.make_directory(RECIPES_DIR)
+	}
+}
+
+// List all .json files in the recipes directory.
+// Returns a slice of filenames (without path prefix).
+// Caller must delete the returned slice and each string in it.
+recipes_list_files :: proc() -> []string {
+	recipes_ensure_dir()
+
+	entries, read_err := os.read_all_directory_by_path(RECIPES_DIR, context.allocator)
+	if read_err != nil do return {}
+	defer {
+		for e in entries {
+			os.file_info_delete(e, context.allocator)
+		}
+		delete(entries)
+	}
+
+	names: [dynamic]string
+	for entry in entries {
+		if entry.type == .Directory do continue
+		if strings.has_suffix(entry.name, ".json") {
+			append(&names, strings.clone(entry.name))
+		}
+	}
+
+	return names[:]
 }

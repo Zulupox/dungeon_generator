@@ -90,6 +90,25 @@ Room_Group :: struct {
 	module_ids: [dynamic]int,
 }
 
+// ---------------------------------------------------------------------------
+// Room Palette - adjacency rules and room budgets
+// ---------------------------------------------------------------------------
+
+Room_Quota :: struct {
+	room_type: Room_Type,
+	min_count: int,
+	max_count: int,  // 0 = unlimited
+	weight:    f32,  // relative probability when eligible (default 1.0)
+}
+
+Room_Palette :: struct {
+	// Adjacency table: for each room type, which types are allowed next to it.
+	// An empty slice means "allow everything" (used for Generic/Courtyard).
+	adjacency: [Room_Type][]Room_Type,
+	quotas:    [dynamic]Room_Quota,
+	active:    bool,  // false = no palette constraints (backward compatible)
+}
+
 Dungeon :: struct {
 	config:  Dungeon_Config,
 	grid:    []Grid_Cell,
@@ -112,6 +131,10 @@ Dungeon :: struct {
 	groups:              [dynamic]Room_Group,
 	active_group:        string,  // set by dispatcher from step's group; "" = no tagging
 	active_source_group: string,  // set by dispatcher from step's source_group; "" = no filter
+
+	// Room palette system
+	palette:          Room_Palette,
+	room_type_counts: [Room_Type]int,  // how many of each type have been placed
 
 	// Per-step working data (cleared between steps)
 	mst_edges:        [dynamic]Corridor_Job,
@@ -153,6 +176,7 @@ dungeon_destroy :: proc(d: ^Dungeon) {
 	delete(d.mst_edges)
 	delete(d.loop_edges)
 	delete(d.placement_queue)
+	palette_destroy(&d.palette)
 	recipe_destroy(&d.recipe)
 }
 
@@ -178,6 +202,9 @@ dungeon_reset :: proc(d: ^Dungeon) {
 	d.active_area_exclude = false
 	d.active_group = ""
 	d.active_source_group = ""
+	// Reset palette
+	palette_reset(&d.palette)
+	d.room_type_counts = {}
 }
 
 dungeon_clear_grid :: proc(d: ^Dungeon) {
@@ -366,5 +393,7 @@ dungeon_generate_step :: proc(d: ^Dungeon) {
 		execute_wall_border(d, &step.wall_border)
 	case .Connect_Linear:
 		execute_connect_linear(d, &step.connect_linear)
+	case .Define_Palette:
+		execute_define_palette(d, &step.define_palette)
 	}
 }

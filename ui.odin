@@ -3,6 +3,8 @@ package dungeon_generator
 import rl "vendor:raylib"
 import "core:fmt"
 import "core:c"
+import "core:os"
+import "core:strings"
 
 import imgui "libs/odin-imgui"
 
@@ -20,6 +22,14 @@ ui_mouse_on_panel :: proc() -> bool {
 // Recipe editor state
 preset_selected: int = 0
 add_step_type_selected: int = 0
+
+// File save/load state
+save_name_buf: [128]c.char
+save_status_msg: cstring = nil
+save_status_timer: f32 = 0
+saved_file_list: []string
+saved_file_list_dirty: bool = true
+load_selected: int = -1
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -46,7 +56,7 @@ ADD_STEP_OPTIONS := [?]cstring{
 	"Place Grid", "Room Corridor", "Define Area", "Pack Rooms",
 	"Join Rooms", "Connect Doors", "Place Specific", "Mirror Rooms",
 	"Place Symmetric", "Place Perimeter", "Place Along Line",
-	"Fill Area", "Wall Border", "Connect Linear",
+	"Fill Area", "Wall Border", "Connect Linear", "Define Palette",
 }
 ADD_STEP_TYPES := [?]Step_Type{
 	.Seed_Rooms, .Grow_Clusters, .Connect_MST, .Mark_Doors,
@@ -54,7 +64,7 @@ ADD_STEP_TYPES := [?]Step_Type{
 	.Place_Grid, .Room_Corridor, .Define_Area, .Pack_Rooms,
 	.Join_Rooms, .Connect_Doors, .Place_Specific, .Mirror_Rooms,
 	.Place_Symmetric, .Place_Perimeter, .Place_Along_Line,
-	.Fill_Area, .Wall_Border, .Connect_Linear,
+	.Fill_Area, .Wall_Border, .Connect_Linear, .Define_Palette,
 }
 
 // Grid size options
@@ -86,6 +96,7 @@ STEP_TYPE_COLORS := [Step_Type]rl.Color{
 	.Fill_Area        = {180, 160, 120, 255},
 	.Wall_Border      = {140, 130, 110, 255},
 	.Connect_Linear   = {120, 180, 255, 255},
+	.Define_Palette   = {220, 200, 140, 255},
 }
 
 // ---------------------------------------------------------------------------
@@ -190,6 +201,25 @@ ui_step_params :: proc(step: ^Gen_Step) {
 		ui_drag_int("Thickness", &step.wall_border.thickness, 1, 5)
 	case .Connect_Linear:
 		imgui.SliderFloat("Manhattan", &step.connect_linear.manhattan_weight, 0.0, 1.0)
+	case .Define_Palette:
+		imgui.Checkbox("Use Defaults", &step.define_palette.use_defaults)
+		if step.define_palette.use_defaults {
+			imgui.TextColored({0.5, 0.7, 0.5, 1.0}, "Castle adjacency rules")
+		}
+		imgui.Separator()
+		imgui.Text("Quotas:")
+		ui_drag_int("Num Quotas", &step.define_palette.num_quotas, 0, 16)
+		for qi in 0 ..< step.define_palette.num_quotas {
+			imgui.PushIDInt(c.int(qi))
+			rt_val := c.int(step.define_palette.quota_types[qi])
+			if imgui.Combo("Type", &rt_val,
+				"Generic\x00Throne_Room\x00Great_Hall\x00Barracks\x00Armory\x00Kitchen\x00Dining_Hall\x00Bedroom\x00Treasury\x00Guard_Room\x00Chapel\x00Library\x00Storage\x00Courtyard\x00Gatehouse\x00Corridor\x00\x00") {
+				step.define_palette.quota_types[qi] = Room_Type(rt_val)
+			}
+			ui_drag_int("Max", &step.define_palette.quota_max_counts[qi], 0, 50)
+			imgui.SliderFloat("Weight", &step.define_palette.quota_weights[qi], 0.0, 5.0)
+			imgui.PopID()
+		}
 	}
 
 	// Area constraint (for all steps except Define_Area)
@@ -415,6 +445,8 @@ draw_ui :: proc() {
 					new_step.wall_border = {thickness = 2}
 				case .Connect_Linear:
 					new_step.connect_linear = {manhattan_weight = 0.8}
+				case .Define_Palette:
+					new_step.define_palette = {use_defaults = true}
 				}
 				append(&d.recipe.steps, new_step)
 			}
@@ -458,6 +490,12 @@ draw_ui :: proc() {
 			imgui.EndTabItem()
 		}
 
+		// ---- Files tab (save/load recipes) ----
+		if imgui.BeginTabItem("Files") {
+			ui_files_tab(d)
+			imgui.EndTabItem()
+		}
+
 		// ---- Controls tab ----
 		if imgui.BeginTabItem("Keys") {
 			imgui.TextColored({0.5, 0.5, 0.6, 1.0}, "[Tab]   Toggle camera")
@@ -470,6 +508,143 @@ draw_ui :: proc() {
 		}
 
 		imgui.EndTabBar()
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Files tab - save/load recipes to disk
+// ---------------------------------------------------------------------------
+
+ui_files_tab :: proc(d: ^Dungeon) {
+	avail_w := imgui.GetContentRegionAvail().x
+
+	// ---- Save section ----
+	imgui.TextColored({0.8, 0.9, 1.0, 1.0}, "Save Recipe")
+	imgui.Separator()
+
+	imgui.SetNextItemWidth(avail_w - 55)
+	imgui.InputTextWithHint("##save_name", "filename", cstring(&save_name_buf[0]), c.size_t(len(save_name_buf)))
+
+	imgui.SameLine()
+	if imgui.Button("Save", {50, 0}) {
+		name_str := string(cstring(&save_name_buf[0]))
+		if len(name_str) > 0 {
+			// Append .json if not already present
+			filename: string
+			if strings.has_suffix(name_str, ".json") {
+				filename = name_str
+			} else {
+				filename = fmt.tprintf("%s.json", name_str)
+			}
+			filepath := fmt.tprintf("%s/%s", RECIPES_DIR, filename)
+
+			// Save with actual_seed so reloading reproduces the same dungeon
+			saved_seed := d.recipe.seed
+			if d.actual_seed != 0 {
+				d.recipe.seed = d.actual_seed
+			}
+
+			if recipe_save(&d.recipe, filepath) {
+				save_status_msg = "Saved!"
+				save_status_timer = 2.0
+				saved_file_list_dirty = true
+			} else {
+				save_status_msg = "Save failed!"
+				save_status_timer = 3.0
+			}
+
+			d.recipe.seed = saved_seed
+		} else {
+			save_status_msg = "Enter a filename"
+			save_status_timer = 2.0
+		}
+	}
+
+	// Status message with fade
+	if save_status_timer > 0 {
+		alpha := min(save_status_timer, 1.0)
+		is_error := save_status_msg == "Save failed!" || save_status_msg == "Enter a filename"
+		col := imgui.Vec4{0.3, 1.0, 0.3, alpha} if !is_error else imgui.Vec4{1.0, 0.4, 0.3, alpha}
+		imgui.TextColored(col, save_status_msg)
+		save_status_timer -= rl.GetFrameTime()
+	}
+
+	imgui.Spacing()
+	imgui.Spacing()
+
+	// ---- Load section ----
+	imgui.TextColored({0.8, 0.9, 1.0, 1.0}, "Load Recipe")
+	imgui.Separator()
+
+	// Refresh file list when needed
+	if saved_file_list_dirty {
+		// Free old list
+		for s in saved_file_list {
+			delete(s)
+		}
+		delete(saved_file_list)
+		saved_file_list = recipes_list_files()
+		saved_file_list_dirty = false
+		load_selected = -1
+	}
+
+	if imgui.SmallButton("Refresh") {
+		saved_file_list_dirty = true
+	}
+
+	if len(saved_file_list) == 0 {
+		imgui.TextColored({0.5, 0.5, 0.6, 1.0}, "No saved recipes found.")
+		imgui.TextColored({0.5, 0.5, 0.6, 1.0}, fmt.ctprintf("(%s/)", RECIPES_DIR))
+	} else {
+		// File list box
+		list_height := min(f32(len(saved_file_list)) * imgui.GetTextLineHeightWithSpacing() + 8, 200.0)
+		if imgui.BeginListBox("##file_list", {avail_w, list_height}) {
+			for i in 0 ..< len(saved_file_list) {
+				is_sel := i == load_selected
+				label := fmt.ctprintf("%s", saved_file_list[i])
+				if imgui.Selectable(label, is_sel) {
+					load_selected = i
+				}
+			}
+			imgui.EndListBox()
+		}
+
+		btn_w := (avail_w - 8) / 2
+
+		has_selection := load_selected >= 0 && load_selected < len(saved_file_list)
+
+		if !has_selection { imgui.BeginDisabled() }
+		if imgui.Button("Load", {btn_w, 0}) && has_selection {
+			filepath := fmt.tprintf("%s/%s", RECIPES_DIR, saved_file_list[load_selected])
+			loaded, ok := recipe_load(filepath)
+			if ok {
+				recipe_destroy(&d.recipe)
+				d.recipe = loaded
+				save_status_msg = "Loaded!"
+				save_status_timer = 2.0
+			} else {
+				save_status_msg = "Load failed!"
+				save_status_timer = 3.0
+			}
+		}
+		if !has_selection { imgui.EndDisabled() }
+
+		imgui.SameLine()
+
+		if !has_selection { imgui.BeginDisabled() }
+		// Delete button with confirmation color
+		imgui.PushStyleColorImVec4(.Button, {0.6, 0.15, 0.15, 1.0})
+		imgui.PushStyleColorImVec4(.ButtonHovered, {0.8, 0.2, 0.2, 1.0})
+		imgui.PushStyleColorImVec4(.ButtonActive, {0.5, 0.1, 0.1, 1.0})
+		if imgui.Button("Delete", {btn_w, 0}) && has_selection {
+			filepath := fmt.tprintf("%s/%s", RECIPES_DIR, saved_file_list[load_selected])
+			os.remove(filepath)
+			saved_file_list_dirty = true
+			save_status_msg = "Deleted."
+			save_status_timer = 2.0
+		}
+		imgui.PopStyleColor(3)
+		if !has_selection { imgui.EndDisabled() }
 	}
 }
 

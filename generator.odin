@@ -4,6 +4,187 @@ import "core:math"
 import "core:math/rand"
 
 // ---------------------------------------------------------------------------
+// Room Palette - adjacency rules, budgets, and typed template selection
+// ---------------------------------------------------------------------------
+
+palette_reset :: proc(p: ^Room_Palette) {
+	clear(&p.quotas)
+	p.adjacency = {}
+	p.active = false
+}
+
+palette_destroy :: proc(p: ^Room_Palette) {
+	delete(p.quotas)
+}
+
+// Load the built-in default adjacency rules (castle-style).
+palette_load_defaults :: proc(p: ^Room_Palette) {
+	p.active = true
+
+	// Generic and Courtyard connect to anything (empty slice = allow all)
+	p.adjacency[.Generic]   = {}
+	p.adjacency[.Courtyard] = {}
+
+	// Typed adjacency rules
+	p.adjacency[.Throne_Room]  = DEFAULT_ADJ_THRONE_ROOM[:]
+	p.adjacency[.Great_Hall]   = DEFAULT_ADJ_GREAT_HALL[:]
+	p.adjacency[.Barracks]     = DEFAULT_ADJ_BARRACKS[:]
+	p.adjacency[.Armory]       = DEFAULT_ADJ_ARMORY[:]
+	p.adjacency[.Kitchen]      = DEFAULT_ADJ_KITCHEN[:]
+	p.adjacency[.Dining_Hall]  = DEFAULT_ADJ_DINING_HALL[:]
+	p.adjacency[.Bedroom]      = DEFAULT_ADJ_BEDROOM[:]
+	p.adjacency[.Treasury]     = DEFAULT_ADJ_TREASURY[:]
+	p.adjacency[.Guard_Room]   = DEFAULT_ADJ_GUARD_ROOM[:]
+	p.adjacency[.Chapel]       = DEFAULT_ADJ_CHAPEL[:]
+	p.adjacency[.Library]      = DEFAULT_ADJ_LIBRARY[:]
+	p.adjacency[.Storage]      = DEFAULT_ADJ_STORAGE[:]
+	p.adjacency[.Gatehouse]    = DEFAULT_ADJ_GATEHOUSE[:]
+	p.adjacency[.Corridor]     = DEFAULT_ADJ_CORRIDOR[:]
+}
+
+// Default adjacency lists (global data, not allocated)
+DEFAULT_ADJ_THRONE_ROOM  := [?]Room_Type{.Great_Hall, .Guard_Room, .Corridor, .Generic}
+DEFAULT_ADJ_GREAT_HALL   := [?]Room_Type{.Throne_Room, .Dining_Hall, .Corridor, .Chapel, .Generic}
+DEFAULT_ADJ_BARRACKS     := [?]Room_Type{.Armory, .Guard_Room, .Corridor, .Storage, .Generic, .Barracks}
+DEFAULT_ADJ_ARMORY       := [?]Room_Type{.Barracks, .Guard_Room, .Corridor, .Generic}
+DEFAULT_ADJ_KITCHEN      := [?]Room_Type{.Dining_Hall, .Storage, .Corridor, .Generic}
+DEFAULT_ADJ_DINING_HALL  := [?]Room_Type{.Kitchen, .Great_Hall, .Corridor, .Generic}
+DEFAULT_ADJ_BEDROOM      := [?]Room_Type{.Corridor, .Library, .Generic, .Bedroom}
+DEFAULT_ADJ_TREASURY     := [?]Room_Type{.Guard_Room}
+DEFAULT_ADJ_GUARD_ROOM   := [?]Room_Type{.Treasury, .Barracks, .Armory, .Gatehouse, .Corridor, .Generic}
+DEFAULT_ADJ_CHAPEL       := [?]Room_Type{.Great_Hall, .Library, .Corridor, .Generic}
+DEFAULT_ADJ_LIBRARY      := [?]Room_Type{.Chapel, .Bedroom, .Corridor, .Generic}
+DEFAULT_ADJ_STORAGE      := [?]Room_Type{.Kitchen, .Barracks, .Corridor, .Generic}
+DEFAULT_ADJ_GATEHOUSE    := [?]Room_Type{.Guard_Room, .Courtyard, .Corridor, .Generic}
+DEFAULT_ADJ_CORRIDOR     := [?]Room_Type{.Generic, .Barracks, .Guard_Room, .Great_Hall, .Kitchen, .Dining_Hall, .Bedroom, .Chapel, .Library, .Storage, .Armory, .Gatehouse, .Courtyard}
+
+// Execute the Define_Palette step: configures the active palette.
+execute_define_palette :: proc(d: ^Dungeon, params: ^Define_Palette_Params) {
+	if params.use_defaults {
+		palette_load_defaults(&d.palette)
+	} else {
+		d.palette.active = true
+		d.palette.adjacency = {}
+	}
+
+	// Apply quotas from params
+	clear(&d.palette.quotas)
+	for i in 0 ..< params.num_quotas {
+		w := params.quota_weights[i]
+		if w <= 0 do w = 1.0
+		append(&d.palette.quotas, Room_Quota{
+			room_type = params.quota_types[i],
+			max_count = params.quota_max_counts[i],
+			weight    = w,
+		})
+	}
+
+	d.step_done = true
+}
+
+// Select a template index given a parent room's type.
+// Respects adjacency rules and quotas from the active palette.
+// Returns (template_index, true) on success, or (0, false) if nothing eligible.
+select_template_for_context :: proc(d: ^Dungeon, parent_type: Room_Type) -> (int, bool) {
+	if !d.palette.active {
+		// No palette active: uniform random (legacy behavior)
+		return rand.int_max(len(MODULE_TEMPLATES)), true
+	}
+
+	// Build list of allowed room types based on adjacency from parent
+	allowed := d.palette.adjacency[parent_type]
+	allow_all := len(allowed) == 0  // empty = allow everything
+
+	// Collect eligible (template_index, weight) pairs
+	Candidate :: struct {
+		index:  int,
+		weight: f32,
+	}
+	candidates: [64]Candidate  // stack-allocated, max 64 templates
+	num_candidates := 0
+
+	for ti in 0 ..< len(MODULE_TEMPLATES) {
+		tmpl := &MODULE_TEMPLATES[ti]
+		rt := tmpl.room_type
+
+		// Check adjacency
+		if !allow_all {
+			found := false
+			for a in allowed {
+				if a == rt { found = true; break }
+			}
+			if !found do continue
+		}
+
+		// Check quota
+		over_budget := false
+		for q in d.palette.quotas {
+			if q.room_type == rt && q.max_count > 0 {
+				if d.room_type_counts[rt] >= q.max_count {
+					over_budget = true
+					break
+				}
+			}
+		}
+		if over_budget do continue
+
+		// Determine weight
+		w: f32 = 1.0
+		for q in d.palette.quotas {
+			if q.room_type == rt && q.weight > 0 {
+				w = q.weight
+				break
+			}
+		}
+
+		if num_candidates < len(candidates) {
+			candidates[num_candidates] = {index = ti, weight = w}
+			num_candidates += 1
+		}
+	}
+
+	if num_candidates == 0 {
+		// Fallback: try any Generic template that isn't over budget
+		for ti in 0 ..< len(MODULE_TEMPLATES) {
+			if MODULE_TEMPLATES[ti].room_type == .Generic {
+				if num_candidates < len(candidates) {
+					candidates[num_candidates] = {index = ti, weight = 1.0}
+					num_candidates += 1
+				}
+			}
+		}
+	}
+
+	if num_candidates == 0 do return 0, false
+
+	// Weighted random selection
+	total_weight: f32 = 0
+	for i in 0 ..< num_candidates {
+		total_weight += candidates[i].weight
+	}
+
+	roll := rand.float32() * total_weight
+	accum: f32 = 0
+	for i in 0 ..< num_candidates {
+		accum += candidates[i].weight
+		if roll < accum {
+			return candidates[i].index, true
+		}
+	}
+
+	// Floating point edge case: return last candidate
+	return candidates[num_candidates - 1].index, true
+}
+
+// Get the room type of a placed module.
+get_module_room_type :: proc(d: ^Dungeon, module_idx: int) -> Room_Type {
+	if module_idx < 0 || module_idx >= len(d.modules) do return .Generic
+	ti := d.modules[module_idx].template_index
+	if ti < 0 || ti >= len(MODULE_TEMPLATES) do return .Generic
+	return MODULE_TEMPLATES[ti].room_type
+}
+
+// ---------------------------------------------------------------------------
 // Room Group helpers
 // ---------------------------------------------------------------------------
 
@@ -127,11 +308,11 @@ execute_mark_doors :: proc(d: ^Dungeon) {
 // ---------------------------------------------------------------------------
 
 place_random_room :: proc(d: ^Dungeon) -> bool {
-	num_templates := len(MODULE_TEMPLATES)
 	MAX_RETRIES :: 50
 
 	for attempt in 0 ..< MAX_RETRIES {
-		ti := rand.int_max(num_templates)
+		ti, ti_ok := select_template_for_context(d, .Generic)
+		if !ti_ok do return false
 		tmpl := &MODULE_TEMPLATES[ti]
 		rot := Rotation(rand.int_max(4))
 
@@ -185,7 +366,6 @@ try_grow_cluster_for_module :: proc(d: ^Dungeon, module_idx: int, params: ^Grow_
 // Try to attach a new room to a random door of a random module in the cluster.
 grow_cluster :: proc(d: ^Dungeon, cluster: ^[dynamic]int) -> bool {
 	MAX_RETRIES :: 30
-	num_templates := len(MODULE_TEMPLATES)
 
 	for attempt in 0 ..< MAX_RETRIES {
 		ci := rand.int_max(len(cluster))
@@ -201,7 +381,9 @@ grow_cluster :: proc(d: ^Dungeon, cluster: ^[dynamic]int) -> bool {
 		if !grid_in_bounds(d, nx, ny) do continue
 		if !grid_is_empty(d, nx, ny) do continue
 
-		ti := rand.int_max(num_templates)
+		parent_type := get_module_room_type(d, parent_idx)
+		ti, ti_ok := select_template_for_context(d, parent_type)
+		if !ti_ok do continue
 		tmpl := &MODULE_TEMPLATES[ti]
 		rot := Rotation(rand.int_max(4))
 
@@ -705,6 +887,11 @@ execute_place_symmetric :: proc(d: ^Dungeon, params: ^Place_Symmetric_Params) {
 
 	for mi in 0 ..< len(d.modules) {
 		m := &d.modules[mi]
+
+		// Skip modules outside the active area so we only grow from
+		// doors that belong to this area's region.
+		if d.active_area_id >= 0 && !cell_in_active_area(d, m.grid_x, m.grid_y) do continue
+
 		for di in 0 ..< len(m.rot_doors) {
 			is_connected := false
 			for cd in m.connected_doors {
@@ -716,6 +903,7 @@ execute_place_symmetric :: proc(d: ^Dungeon, params: ^Place_Symmetric_Params) {
 			nx, ny := door_neighbor(door, m.grid_x, m.grid_y)
 			if !grid_in_bounds(d, nx, ny) do continue
 			if !grid_is_empty(d, nx, ny) do continue
+			if !cell_in_active_area(d, nx, ny) do continue
 
 			append(&open_doors, Open_Door{module_idx = mi, door_idx = di})
 		}
@@ -741,10 +929,12 @@ execute_place_symmetric :: proc(d: ^Dungeon, params: ^Place_Symmetric_Params) {
 		if !grid_is_empty(d, nx, ny) do continue
 
 		needed_dir := opposite_direction(door.direction)
+		parent_type := get_module_room_type(d, od.module_idx)
 
 		TEMPLATE_RETRIES :: 15
 		for _ in 0 ..< TEMPLATE_RETRIES {
-			ti := rand.int_max(num_templates)
+			ti, ti_ok := select_template_for_context(d, parent_type)
+			if !ti_ok do break
 			tmpl := &MODULE_TEMPLATES[ti]
 			rot := Rotation(rand.int_max(4))
 
@@ -1057,8 +1247,10 @@ execute_place_perimeter :: proc(d: ^Dungeon, params: ^Place_Perimeter_Params) {
 			ti: int
 			rot: Rotation
 			if attempt < RETRIES - 2 {
-				// Random template + rotation
-				ti = rand.int_max(num_templates)
+				// Typed template selection + random rotation
+				ti_sel, ti_ok := select_template_for_context(d, .Generic)
+				if !ti_ok do break
+				ti = ti_sel
 				rot = Rotation(rand.int_max(4))
 			} else {
 				// Last attempts: force Small Room (template 0) which fits in tight spots
@@ -1253,7 +1445,9 @@ execute_place_along_line :: proc(d: ^Dungeon, params: ^Place_Along_Line_Params) 
 			ti: int
 			rot: Rotation
 			if attempt < RETRIES - 2 {
-				ti = rand.int_max(num_templates)
+				ti_sel, ti_ok := select_template_for_context(d, .Generic)
+				if !ti_ok do break
+				ti = ti_sel
 				rot = Rotation(rand.int_max(4))
 			} else {
 				// Fallback to small room
@@ -1799,11 +1993,11 @@ bsp_split :: proc(d: ^Dungeon, rect: BSP_Rect, min_size, padding: int) {
 
 // Place a room template within a target region.
 place_room_in_region :: proc(d: ^Dungeon, target: Placement_Target) {
-	num_templates := len(MODULE_TEMPLATES)
 	MAX_RETRIES :: 30
 
 	for attempt in 0 ..< MAX_RETRIES {
-		ti := rand.int_max(num_templates)
+		ti, ti_ok := select_template_for_context(d, .Generic)
+		if !ti_ok do return
 		tmpl := &MODULE_TEMPLATES[ti]
 		rot := Rotation(rand.int_max(4))
 
@@ -2133,11 +2327,11 @@ try_place_chain_room :: proc(
 	target_dx, target_dy: f32,
 	strictness: f32,
 ) -> Chain_Place_Result {
-	num_templates := len(MODULE_TEMPLATES)
 	MAX_RETRIES :: 40
 
 	for attempt in 0 ..< MAX_RETRIES {
-		ti := rand.int_max(num_templates)
+		ti, ti_ok := select_template_for_context(d, .Generic)
+		if !ti_ok do break
 		tmpl := &MODULE_TEMPLATES[ti]
 		rot := Rotation(rand.int_max(4))
 
@@ -2297,6 +2491,11 @@ execute_pack_rooms :: proc(d: ^Dungeon, params: ^Pack_Rooms_Params) {
 
 	for mi in 0 ..< len(d.modules) {
 		m := &d.modules[mi]
+
+		// Skip modules outside the active area so we only grow from
+		// doors that belong to this area's region.
+		if d.active_area_id >= 0 && !cell_in_active_area(d, m.grid_x, m.grid_y) do continue
+
 		for di in 0 ..< len(m.rot_doors) {
 			// Check if this door is already connected
 			is_connected := false
@@ -2313,6 +2512,7 @@ execute_pack_rooms :: proc(d: ^Dungeon, params: ^Pack_Rooms_Params) {
 			nx, ny := door_neighbor(door, m.grid_x, m.grid_y)
 			if !grid_in_bounds(d, nx, ny) do continue
 			if !grid_is_empty(d, nx, ny) do continue
+			if !cell_in_active_area(d, nx, ny) do continue
 
 			append(&open_doors, Open_Door{module_idx = mi, door_idx = di})
 		}
@@ -2340,11 +2540,13 @@ execute_pack_rooms :: proc(d: ^Dungeon, params: ^Pack_Rooms_Params) {
 		if !grid_is_empty(d, nx, ny) do continue
 
 		needed_dir := opposite_direction(door.direction)
+		parent_type := get_module_room_type(d, od.module_idx)
 
 		// Try several random templates/rotations
 		TEMPLATE_RETRIES :: 15
 		for _ in 0 ..< TEMPLATE_RETRIES {
-			ti := rand.int_max(num_templates)
+			ti, ti_ok := select_template_for_context(d, parent_type)
+			if !ti_ok do break
 			tmpl := &MODULE_TEMPLATES[ti]
 			rot := Rotation(rand.int_max(4))
 
