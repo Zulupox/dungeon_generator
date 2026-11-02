@@ -23,6 +23,7 @@ App_State :: struct {
 	gen_step_timer:    f32,
 	show_ui:           bool,
 	canvas:            Canvas_State,
+	editor:            Template_Editor,
 }
 
 // Global state (accessible from ui.odin etc.)
@@ -50,6 +51,9 @@ main :: proc() {
 	imgui_rl.init()
 	defer imgui_rl.shutdown()
 	imgui_rl.build_font_atlas()
+
+	templates_init()
+	defer templates_destroy()
 
 	state.dungeon = dungeon_create(config)
 	state.dungeon.recipe = recipe_classic_dungeon()
@@ -105,25 +109,28 @@ update :: proc(dt: f32) {
 			state.show_ui = !state.show_ui
 		}
 
-		if rl.IsKeyPressed(.G) {
-			state.gen_animated = !state.gen_animated
-		}
-
-		if rl.IsKeyPressed(.R) {
-			if state.gen_animated {
-				dungeon_start_generation(&state.dungeon)
-				state.gen_step_timer = 0
-			} else {
-				dungeon_generate_full(&state.dungeon)
+		// Generation keys would overwrite the template being edited
+		if !state.editor.active {
+			if rl.IsKeyPressed(.G) {
+				state.gen_animated = !state.gen_animated
 			}
-		}
 
-		if rl.IsKeyPressed(.SPACE) {
-			if state.dungeon.gen_done {
-				dungeon_start_generation(&state.dungeon)
-				state.gen_step_timer = 0
+			if rl.IsKeyPressed(.R) {
+				if state.gen_animated {
+					dungeon_start_generation(&state.dungeon)
+					state.gen_step_timer = 0
+				} else {
+					dungeon_generate_full(&state.dungeon)
+				}
 			}
-			dungeon_generate_step(&state.dungeon)
+
+			if rl.IsKeyPressed(.SPACE) {
+				if state.dungeon.gen_done {
+					dungeon_start_generation(&state.dungeon)
+					state.gen_step_timer = 0
+				}
+				dungeon_generate_step(&state.dungeon)
+			}
 		}
 	}
 
@@ -135,7 +142,11 @@ update :: proc(dt: f32) {
 		}
 	}
 
-	canvas_update()
+	if state.editor.active {
+		editor_update()
+	} else {
+		canvas_update()
+	}
 
 	if !io.WantCaptureMouse {
 		switch state.camera_mode {
@@ -169,7 +180,11 @@ draw :: proc() {
 	render_dungeon(&state.dungeon)
 	render_grid_outline(&state.dungeon)
 	render_areas(&state.dungeon)
-	canvas_render_3d(&state.dungeon)
+	if state.editor.active {
+		editor_render_3d(&state.dungeon)
+	} else {
+		canvas_render_3d(&state.dungeon)
+	}
 
 	rl.EndMode3D()
 

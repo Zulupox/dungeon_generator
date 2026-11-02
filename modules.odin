@@ -137,7 +137,13 @@ throne_room_doors := [?]Door_Slot{
 	{local_x = 0, local_y = 6, direction = .West},
 }
 
-MODULE_TEMPLATES := [?]Module_Template{
+// Runtime template list used by generation. Filled from DEFAULT_MODULE_TEMPLATES or
+// modules.json at startup (see templates.odin) and changed by the template editor.
+// Each entry owns its name, mask and door slots.
+module_templates: [dynamic]Module_Template
+
+// Built-in templates (static data, never edited or freed).
+DEFAULT_MODULE_TEMPLATES := [?]Module_Template{
 	// 0: Small Room (2x2)
 	{
 		name       = "Small Room",
@@ -297,7 +303,7 @@ can_place_module :: proc(d: ^Dungeon, rot_mask: []bool, rw, rh, gx, gy: int) -> 
 
 // Place a module on the grid with a given rotation.
 stamp_module :: proc(d: ^Dungeon, template_index: int, gx, gy: int, rot: Rotation) -> int {
-	tmpl := &MODULE_TEMPLATES[template_index]
+	tmpl := &module_templates[template_index]
 	module_id := len(d.modules)
 
 	// Build rotated data
@@ -545,25 +551,25 @@ dungeon_show_modules :: proc(d: ^Dungeon) {
 
 	gw := d.config.grid_width
 	gh := d.config.grid_height
-	count := len(MODULE_TEMPLATES)
+	count := len(module_templates)
 	cols := clamp((gw - 2) / SHOWCASE_SLOT_W, 1, SHOWCASE_MAX_COLS)
 	rows := (count + cols - 1) / cols
 
 	// Row heights from the tallest module in each row
-	row_y: [len(MODULE_TEMPLATES)]int
+	row_y := make([]int, rows, context.temp_allocator)
 	total_h := 0
 	for row in 0 ..< rows {
 		row_y[row] = total_h
 		row_h := 0
 		for i in row * cols ..< min((row + 1) * cols, count) {
-			row_h = max(row_h, MODULE_TEMPLATES[i].height)
+			row_h = max(row_h, module_templates[i].height)
 		}
 		total_h += row_h + SHOWCASE_LABEL_ROWS
 	}
 	off_x := max((gw - cols * SHOWCASE_SLOT_W) / 2, 0)
 	off_y := max((gh - total_h) / 2, 0)
 
-	for &tmpl, i in MODULE_TEMPLATES {
+	for &tmpl, i in module_templates {
 		col := i % cols
 		gx := off_x + col * SHOWCASE_SLOT_W + (SHOWCASE_SLOT_W - tmpl.width) / 2
 		gy := off_y + row_y[i / cols]

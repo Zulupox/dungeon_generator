@@ -54,11 +54,11 @@ Canvas_State :: struct {
 // Coordinate conversion
 // ---------------------------------------------------------------------------
 
-// Raycast from screen position to the Y=0 ground plane.
-screen_to_ground :: proc(screen_pos: rl.Vector2, camera: rl.Camera3D) -> (world_x, world_z: f32, ok: bool) {
+// Raycast from screen position to a horizontal plane (default: the Y=0 ground plane).
+screen_to_ground :: proc(screen_pos: rl.Vector2, camera: rl.Camera3D, plane_y: f32 = 0) -> (world_x, world_z: f32, ok: bool) {
 	ray := rl.GetScreenToWorldRay(screen_pos, camera)
 	if abs(ray.direction.y) < 0.0001 do return 0, 0, false
-	t := -ray.position.y / ray.direction.y
+	t := (plane_y - ray.position.y) / ray.direction.y
 	if t < 0 do return 0, 0, false
 	return ray.position.x + t * ray.direction.x, ray.position.z + t * ray.direction.z, true
 }

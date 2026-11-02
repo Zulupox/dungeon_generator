@@ -127,12 +127,12 @@ execute_mark_doors :: proc(d: ^Dungeon) {
 // ---------------------------------------------------------------------------
 
 place_random_room :: proc(d: ^Dungeon) -> bool {
-	num_templates := len(MODULE_TEMPLATES)
+	num_templates := len(module_templates)
 	MAX_RETRIES :: 50
 
 	for attempt in 0 ..< MAX_RETRIES {
 		ti := rand.int_max(num_templates)
-		tmpl := &MODULE_TEMPLATES[ti]
+		tmpl := &module_templates[ti]
 		rot := Rotation(rand.int_max(4))
 
 		rw, rh := rotated_dims(tmpl.width, tmpl.height, rot)
@@ -185,7 +185,7 @@ try_grow_cluster_for_module :: proc(d: ^Dungeon, module_idx: int, params: ^Grow_
 // Try to attach a new room to a random door of a random module in the cluster.
 grow_cluster :: proc(d: ^Dungeon, cluster: ^[dynamic]int) -> bool {
 	MAX_RETRIES :: 30
-	num_templates := len(MODULE_TEMPLATES)
+	num_templates := len(module_templates)
 
 	for attempt in 0 ..< MAX_RETRIES {
 		ci := rand.int_max(len(cluster))
@@ -202,7 +202,7 @@ grow_cluster :: proc(d: ^Dungeon, cluster: ^[dynamic]int) -> bool {
 		if !grid_is_empty(d, nx, ny) do continue
 
 		ti := rand.int_max(num_templates)
-		tmpl := &MODULE_TEMPLATES[ti]
+		tmpl := &module_templates[ti]
 		rot := Rotation(rand.int_max(4))
 
 		needed_dir := opposite_direction(door.direction)
@@ -561,9 +561,9 @@ execute_connect_doors :: proc(d: ^Dungeon, params: ^Connect_Doors_Params) {
 // ---------------------------------------------------------------------------
 
 execute_place_specific :: proc(d: ^Dungeon, params: ^Place_Specific_Params) {
-	ti := clamp(params.template_index, 0, len(MODULE_TEMPLATES) - 1)
+	ti := clamp(params.template_index, 0, len(module_templates) - 1)
 	rot := Rotation(clamp(params.rotation, 0, 3))
-	tmpl := &MODULE_TEMPLATES[ti]
+	tmpl := &module_templates[ti]
 
 	rot_mask, rmw, rmh := build_rotated_mask(tmpl, rot)
 	defer delete(rot_mask)
@@ -611,7 +611,7 @@ execute_mirror_rooms :: proc(d: ^Dungeon, params: ^Mirror_Rooms_Params) {
 	for src_id in src_copy {
 		if src_id < 0 || src_id >= len(d.modules) do continue
 		src := &d.modules[src_id]
-		tmpl := &MODULE_TEMPLATES[src.template_index]
+		tmpl := &module_templates[src.template_index]
 
 		// Compute mirrored position
 		mx, my: int
@@ -659,7 +659,7 @@ execute_mirror_rooms :: proc(d: ^Dungeon, params: ^Mirror_Rooms_Params) {
 place_symmetric_fail_count: int = 0
 
 execute_place_symmetric :: proc(d: ^Dungeon, params: ^Place_Symmetric_Params) {
-	num_templates := len(MODULE_TEMPLATES)
+	num_templates := len(module_templates)
 
 	// Safety cap (counts primary rooms only)
 	if params.max_rooms > 0 && d.step_progress >= params.max_rooms {
@@ -745,7 +745,7 @@ execute_place_symmetric :: proc(d: ^Dungeon, params: ^Place_Symmetric_Params) {
 		TEMPLATE_RETRIES :: 15
 		for _ in 0 ..< TEMPLATE_RETRIES {
 			ti := rand.int_max(num_templates)
-			tmpl := &MODULE_TEMPLATES[ti]
+			tmpl := &module_templates[ti]
 			rot := Rotation(rand.int_max(4))
 
 			rot_doors_tmp := build_rotated_doors(tmpl, rot)
@@ -965,7 +965,7 @@ perimeter_pos_idx: int = 0
 perimeter_fail_count: int = 0
 
 execute_place_perimeter :: proc(d: ^Dungeon, params: ^Place_Perimeter_Params) {
-	num_templates := len(MODULE_TEMPLATES)
+	num_templates := len(module_templates)
 
 	// Safety cap
 	if params.max_rooms > 0 && d.step_progress >= params.max_rooms {
@@ -1065,7 +1065,7 @@ execute_place_perimeter :: proc(d: ^Dungeon, params: ^Place_Perimeter_Params) {
 				ti = 0
 				rot = Rotation(rand.int_max(4))
 			}
-			tmpl := &MODULE_TEMPLATES[ti]
+			tmpl := &module_templates[ti]
 
 			rot_doors := build_rotated_doors(tmpl, rot)
 
@@ -1127,7 +1127,7 @@ execute_place_perimeter :: proc(d: ^Dungeon, params: ^Place_Perimeter_Params) {
 		for _ in 0 ..< GAP_RETRIES {
 			// Prefer small rooms for gap filling
 			ti := rand.int_max(3)  // templates 0-2 are the smallest (2x2, 3x3, 4x2)
-			tmpl := &MODULE_TEMPLATES[ti]
+			tmpl := &module_templates[ti]
 			rot := Rotation(rand.int_max(4))
 			rw, rh := rotated_dims(tmpl.width, tmpl.height, rot)
 
@@ -1175,7 +1175,7 @@ execute_place_perimeter :: proc(d: ^Dungeon, params: ^Place_Perimeter_Params) {
 // One-shot step (places all rooms at once for simplicity).
 
 execute_place_along_line :: proc(d: ^Dungeon, params: ^Place_Along_Line_Params) {
-	num_templates := len(MODULE_TEMPLATES)
+	num_templates := len(module_templates)
 
 	// Determine travel direction and perpendicular door direction(s)
 	dx := params.x2 - params.x1
@@ -1260,7 +1260,7 @@ execute_place_along_line :: proc(d: ^Dungeon, params: ^Place_Along_Line_Params) 
 				ti = 0
 				rot = Rotation(rand.int_max(4))
 			}
-			tmpl := &MODULE_TEMPLATES[ti]
+			tmpl := &module_templates[ti]
 
 			rot_doors := build_rotated_doors(tmpl, rot)
 
@@ -1799,12 +1799,12 @@ bsp_split :: proc(d: ^Dungeon, rect: BSP_Rect, min_size, padding: int) {
 
 // Place a room template within a target region.
 place_room_in_region :: proc(d: ^Dungeon, target: Placement_Target) {
-	num_templates := len(MODULE_TEMPLATES)
+	num_templates := len(module_templates)
 	MAX_RETRIES :: 30
 
 	for attempt in 0 ..< MAX_RETRIES {
 		ti := rand.int_max(num_templates)
-		tmpl := &MODULE_TEMPLATES[ti]
+		tmpl := &module_templates[ti]
 		rot := Rotation(rand.int_max(4))
 
 		rw, rh := rotated_dims(tmpl.width, tmpl.height, rot)
@@ -2133,12 +2133,12 @@ try_place_chain_room :: proc(
 	target_dx, target_dy: f32,
 	strictness: f32,
 ) -> Chain_Place_Result {
-	num_templates := len(MODULE_TEMPLATES)
+	num_templates := len(module_templates)
 	MAX_RETRIES :: 40
 
 	for attempt in 0 ..< MAX_RETRIES {
 		ti := rand.int_max(num_templates)
-		tmpl := &MODULE_TEMPLATES[ti]
+		tmpl := &module_templates[ti]
 		rot := Rotation(rand.int_max(4))
 
 		rot_doors := build_rotated_doors(tmpl, rot)
@@ -2265,7 +2265,7 @@ execute_define_area :: proc(d: ^Dungeon, params: ^Define_Area_Params) {
 pack_rooms_fail_count: int = 0
 
 execute_pack_rooms :: proc(d: ^Dungeon, params: ^Pack_Rooms_Params) {
-	num_templates := len(MODULE_TEMPLATES)
+	num_templates := len(module_templates)
 
 	// Safety cap
 	if params.max_rooms > 0 && d.step_progress >= params.max_rooms {
@@ -2345,7 +2345,7 @@ execute_pack_rooms :: proc(d: ^Dungeon, params: ^Pack_Rooms_Params) {
 		TEMPLATE_RETRIES :: 15
 		for _ in 0 ..< TEMPLATE_RETRIES {
 			ti := rand.int_max(num_templates)
-			tmpl := &MODULE_TEMPLATES[ti]
+			tmpl := &module_templates[ti]
 			rot := Rotation(rand.int_max(4))
 
 			rot_doors := build_rotated_doors(tmpl, rot)

@@ -141,7 +141,7 @@ Connect_Doors_Params :: struct {
 }
 
 Place_Specific_Params :: struct {
-	template_index: int, // which module template (0-6)
+	template_index: int, // index into module_templates (clamped at use)
 	x, y:           int, // grid position (top-left corner)
 	rotation:       int, // 0-3 (maps to Rotation enum)
 }

@@ -144,7 +144,7 @@ ui_step_params :: proc(step: ^Gen_Step) {
 		}
 		ui_drag_int("Max/Pair", &step.connect_doors.max_per_pair, 0, 10)
 	case .Place_Specific:
-		tmpl_idx := clamp(step.place_specific.template_index, 0, len(MODULE_TEMPLATES) - 1)
+		tmpl_idx := clamp(step.place_specific.template_index, 0, len(module_templates) - 1)
 		tmpl_val := c.int(tmpl_idx)
 		if imgui.Combo("Template", &tmpl_val, "Small Room\x00Large Room\x00Long Hall\x00L-Shape\x00Cross\x00Grand Hall\x00Throne Room\x00\x00") {
 			step.place_specific.template_index = int(tmpl_val)
@@ -218,6 +218,11 @@ draw_ui :: proc() {
 	}
 	defer imgui.End()
 
+	if state.editor.active {
+		editor_draw_panel()
+		return
+	}
+
 	// ---- Status (always visible) ----
 	cam_text: cstring = state.camera_mode == .Top_Down ? "Top-Down" : "Freeflight"
 	imgui.Text("Camera:     %s", cam_text)
@@ -264,6 +269,11 @@ draw_ui :: proc() {
 		dungeon_show_modules(d)
 		select_modules_tab = true
 	}
+	imgui.SameLine()
+	if imgui.Button("Editor", {half_width, 0}) {
+		editor_enter()
+	}
+	if imgui.IsItemHovered() do imgui.SetTooltip("Edit room templates")
 
 	imgui.Separator()
 
@@ -514,7 +524,7 @@ ui_module_table :: proc() {
 	imgui.TableSetupColumn("Doors")
 	imgui.TableHeadersRow()
 
-	for &tmpl, i in MODULE_TEMPLATES {
+	for &tmpl, i in module_templates {
 		imgui.PushIDInt(c.int(i))
 		imgui.TableNextRow()
 
@@ -550,7 +560,7 @@ draw_module_labels :: proc(d: ^Dungeon, camera: rl.Camera3D) {
 	stat_col := imgui.ColorConvertFloat4ToU32({0.7, 0.7, 0.75, 1})
 
 	for &m in d.modules {
-		tmpl := &MODULE_TEMPLATES[m.template_index]
+		tmpl := &module_templates[m.template_index]
 		// Anchor just past the module's south edge, on the floor
 		world := rl.Vector3{m.center_x * cs, 0, (f32(m.grid_y + m.rot_height) + 0.3) * cs}
 
@@ -609,7 +619,7 @@ draw_inspector :: proc() {
 	if id < 0 || id >= len(d.modules) do return
 
 	m := &d.modules[id]
-	tmpl := &MODULE_TEMPLATES[m.template_index]
+	tmpl := &module_templates[m.template_index]
 	label_col := imgui.Vec4{0.6, 0.6, 0.7, 1.0}
 
 	display_size := imgui.GetIO().DisplaySize
