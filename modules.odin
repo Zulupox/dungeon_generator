@@ -329,6 +329,7 @@ stamp_module :: proc(d: ^Dungeon, template_index: int, gx, gy: int, rot: Rotatio
 		rot_height     = rh,
 		rot_mask       = rot_mask,
 		rot_doors      = rot_doors,
+		placed_by_step = d.showcase ? -1 : d.current_step,
 	})
 
 	// Mark grid cells
@@ -509,6 +510,8 @@ stamp_module_raw :: proc(d: ^Dungeon, mask: [dynamic]bool, doors: [dynamic]Door_
 		rot_height     = rh,
 		rot_mask       = mask,
 		rot_doors      = doors,
+		placed_by_step = d.current_step,
+		mirrored       = true,
 	})
 
 	// Mark grid cells
@@ -589,4 +592,20 @@ template_door_counts :: proc(tmpl: ^Module_Template) -> [Direction]int {
 		counts[slot.direction] += 1
 	}
 	return counts
+}
+
+// Whether door slot di of a placed module is in use.
+module_door_connected :: proc(m: ^Placed_Module, di: int) -> bool {
+	for cd in m.connected_doors {
+		if cd == di do return true
+	}
+	return false
+}
+
+// Whether door slot di of a placed module has a matching door on the other side.
+module_door_two_sided :: proc(m: ^Placed_Module, di: int) -> bool {
+	for td in m.two_sided_doors {
+		if td == di do return true
+	}
+	return false
 }

@@ -27,6 +27,7 @@ Canvas_State :: struct {
 	mode:             Canvas_Mode,
 	selected_step:    int,   // recipe step index of selected area, -1 = none
 	scroll_to_step:   int,   // one-shot request to scroll UI to this step, -1 = none
+	inspect_module:   int,   // index into dungeon.modules shown in the inspector, -1 = none
 	// Context menu
 	context_open:     bool,
 	context_gx:       int,
@@ -231,6 +232,11 @@ canvas_update :: proc() {
 				}
 			} else {
 				cv.selected_step = -1
+				// Not on an area handle: inspect the room under the cursor (or deselect)
+				cv.inspect_module = -1
+				if grid_in_bounds(d, gx, gy) {
+					cv.inspect_module = grid_get(d, gx, gy).module_id
+				}
 			}
 		}
 
@@ -460,4 +466,58 @@ canvas_render_3d :: proc(d: ^Dungeon) {
 		cz := (z0 + z1) * 0.5
 		rl.DrawCube({cx, 0.01, cz}, x1 - x0, 0.001, z1 - z0, {100, 255, 180, 30})
 	}
+
+	canvas_render_inspected(d)
+}
+
+// Outline the inspected room just above its ceiling and mark every door slot:
+// yellow = two-sided, green = connected, grey = unused (same colors as the inspector).
+canvas_render_inspected :: proc(d: ^Dungeon) {
+	id := state.canvas.inspect_module
+	if id < 0 || id >= len(d.modules) do return
+
+	cs := d.config.cell_size
+	y := d.config.wall_height + 0.06
+	outline := rl.Color{255, 255, 255, 255}
+
+	// Outline from the grid so rooms merged by Join Rooms are covered too
+	for gy in 0 ..< d.config.grid_height {
+		for gx in 0 ..< d.config.grid_width {
+			if grid_get(d, gx, gy).module_id != id do continue
+			x0 := f32(gx) * cs
+			z0 := f32(gy) * cs
+			x1 := x0 + cs
+			z1 := z0 + cs
+			if !canvas_cell_is_module(d, gx, gy - 1, id) do rl.DrawLine3D({x0, y, z0}, {x1, y, z0}, outline)
+			if !canvas_cell_is_module(d, gx, gy + 1, id) do rl.DrawLine3D({x0, y, z1}, {x1, y, z1}, outline)
+			if !canvas_cell_is_module(d, gx - 1, gy, id) do rl.DrawLine3D({x0, y, z0}, {x0, y, z1}, outline)
+			if !canvas_cell_is_module(d, gx + 1, gy, id) do rl.DrawLine3D({x1, y, z0}, {x1, y, z1}, outline)
+		}
+	}
+
+	m := &d.modules[id]
+	marker := cs * 0.22
+	for slot, di in m.rot_doors {
+		dgx, dgy := door_global(slot, m.grid_x, m.grid_y)
+		wx := f32(dgx) * cs + cs * 0.5
+		wz := f32(dgy) * cs + cs * 0.5
+		// Push the marker toward the wall the door sits in
+		switch slot.direction {
+		case .North: wz -= cs * 0.35
+		case .South: wz += cs * 0.35
+		case .East:  wx += cs * 0.35
+		case .West:  wx -= cs * 0.35
+		}
+		color := rl.Color{150, 150, 150, 255}
+		if module_door_two_sided(m, di) {
+			color = {255, 220, 50, 255}
+		} else if module_door_connected(m, di) {
+			color = {80, 255, 120, 255}
+		}
+		rl.DrawCube({wx, y, wz}, marker, 0.02, marker, color)
+	}
+}
+
+canvas_cell_is_module :: proc(d: ^Dungeon, gx, gy, id: int) -> bool {
+	return grid_in_bounds(d, gx, gy) && grid_get(d, gx, gy).module_id == id
 }

@@ -43,6 +43,7 @@ main :: proc() {
 	rl.InitWindow(1280, 800, "Procedural Dungeon Generator")
 	defer rl.CloseWindow()
 	rl.SetTargetFPS(60)
+	rl.SetExitKey(.KEY_NULL) // Esc is used to cancel/deselect, not to quit
 
 	imgui.CreateContext(nil)
 	defer imgui.DestroyContext(nil)
@@ -58,7 +59,7 @@ main :: proc() {
 	state.gen_animated = false
 	gen_step_interval = 0.05
 	state.show_ui = true
-	state.canvas = Canvas_State{selected_step = -1, scroll_to_step = -1}
+	state.canvas = Canvas_State{selected_step = -1, scroll_to_step = -1, inspect_module = -1}
 
 	dungeon_generate_full(&state.dungeon)
 
@@ -94,6 +95,10 @@ update :: proc(dt: f32) {
 				state.camera_mode = .Top_Down
 				rl.EnableCursor()
 			}
+		}
+
+		if rl.IsKeyPressed(.ESCAPE) && state.canvas.mode == .None {
+			state.canvas.inspect_module = -1
 		}
 
 		if rl.IsKeyPressed(.H) {
@@ -176,6 +181,7 @@ draw :: proc() {
 		draw_ui()
 	}
 
+	draw_inspector()
 	canvas_draw_imgui()
 
 	imgui.Render()

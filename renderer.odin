@@ -5,7 +5,7 @@ import rl "vendor:raylib"
 
 // Render settings
 show_ceilings: bool = true
-join_rooms: bool = true // when false, walls stay between adjacent rooms from different modules
+merge_room_walls: bool = true // when false, walls stay between adjacent rooms from different modules
 
 // ---------------------------------------------------------------------------
 // 3D Dungeon Renderer
@@ -163,8 +163,8 @@ should_draw_wall :: proc(d: ^Dungeon, gx, gy, dx, dy: int) -> bool {
 	// Corridors always connect openly
 	if neighbor.cell_type == .Corridor do return false
 
-	// Neighbor is a Room - check join_rooms setting
-	if !join_rooms {
+	// Neighbor is a Room - check merge_room_walls setting
+	if !merge_room_walls {
 		current := &d.grid[grid_index(d, gx, gy)]
 		// Wall between cells from different modules
 		if neighbor.module_id != current.module_id {

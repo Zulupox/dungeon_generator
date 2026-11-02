@@ -62,6 +62,8 @@ Placed_Module :: struct {
 	rot_doors:       [dynamic]Door_Slot,
 	connected_doors: [dynamic]int, // indices into rot_doors that are in use
 	two_sided_doors: [dynamic]int, // subset of connected_doors that have a matching door on the other side
+	placed_by_step:  int,  // recipe step index that placed this module, -1 = module showcase
+	mirrored:        bool, // placed as a mirrored/symmetric copy (rotation not meaningful)
 }
 
 Corridor_Job :: struct {
@@ -176,6 +178,7 @@ dungeon_reset :: proc(d: ^Dungeon) {
 	d.step_done = false
 	d.gen_done = false
 	d.showcase = false
+	state.canvas.inspect_module = -1 // module indices are about to be reused
 	d.active_area_id = -1
 	d.active_area_exclude = false
 	d.active_group = ""

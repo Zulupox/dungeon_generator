@@ -456,7 +456,8 @@ draw_ui :: proc() {
 
 			imgui.SliderFloat("Wall Height", &d.config.wall_height, 0.5, 4.0)
 			imgui.Checkbox("Show Ceilings", &show_ceilings)
-			imgui.Checkbox("Join Rooms", &join_rooms)
+			imgui.Checkbox("Merge Room Walls", &merge_room_walls)
+			if imgui.IsItemHovered() do imgui.SetTooltip("Hide walls between touching rooms.\nDisplay only; the Join Rooms step merges rooms for real.")
 			imgui.Separator()
 			imgui.SliderFloat("Anim Speed", &gen_step_interval, 0.01, 0.3, "%.2fs")
 			imgui.Checkbox("Animated Mode", &state.gen_animated)
@@ -581,4 +582,153 @@ draw_module_labels :: proc(d: ^Dungeon, camera: rl.Camera3D) {
 			y += size.y
 		}
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Room inspector (left-click a room in the top-down view)
+// ---------------------------------------------------------------------------
+
+ROTATION_NAMES := [Rotation]cstring{
+	.R0   = "0",
+	.R90  = "90",
+	.R180 = "180",
+	.R270 = "270",
+}
+
+DIRECTION_NAMES := [Direction]cstring{
+	.North = "N",
+	.South = "S",
+	.East  = "E",
+	.West  = "W",
+}
+
+draw_inspector :: proc() {
+	d := &state.dungeon
+	cv := &state.canvas
+	id := cv.inspect_module
+	if id < 0 || id >= len(d.modules) do return
+
+	m := &d.modules[id]
+	tmpl := &MODULE_TEMPLATES[m.template_index]
+	label_col := imgui.Vec4{0.6, 0.6, 0.7, 1.0}
+
+	display_size := imgui.GetIO().DisplaySize
+	imgui.SetNextWindowPos({display_size.x - 10, 10}, .Always, {1, 0})
+	imgui.SetNextWindowSize({310, 0}, .Always)
+	open := true
+	if !imgui.Begin(fmt.ctprintf("Room #%d###inspector", id), &open, {.NoResize, .NoMove, .NoCollapse, .NoSavedSettings, .NoFocusOnAppearing}) {
+		imgui.End()
+		return
+	}
+	defer imgui.End()
+	if !open {
+		cv.inspect_module = -1
+		return
+	}
+
+	// ---- Template ----
+	imgui.ColorButton("##col", color4_to_vec4(tmpl.color), {.NoTooltip}, {12, 12})
+	imgui.SameLine()
+	imgui.Text("%s", fmt.ctprintf("%s  (template %d)", tmpl.name, m.template_index))
+
+	// ---- Origin ----
+	imgui.TextColored(label_col, "Placed by:")
+	imgui.SameLine()
+	if m.placed_by_step < 0 {
+		imgui.Text("Module showcase")
+	} else if m.placed_by_step < len(d.recipe.steps) {
+		step := &d.recipe.steps[m.placed_by_step]
+		if imgui.SmallButton(fmt.ctprintf("%d. %s", m.placed_by_step + 1, STEP_TYPE_NAMES[step.type])) {
+			cv.scroll_to_step = m.placed_by_step
+		}
+		if imgui.IsItemHovered() do imgui.SetTooltip("Show this step in the Recipe tab")
+	} else {
+		imgui.Text("step %d", c.int(m.placed_by_step + 1))
+	}
+
+	imgui.TextColored(label_col, "Position:")
+	imgui.SameLine()
+	imgui.Text("(%d, %d)", c.int(m.grid_x), c.int(m.grid_y))
+	imgui.SameLine()
+	imgui.TextColored(label_col, "  Rotation:")
+	imgui.SameLine()
+	if m.mirrored {
+		imgui.Text("mirrored")
+	} else {
+		imgui.Text("%s", ROTATION_NAMES[m.rotation])
+	}
+
+	// ---- Size ----
+	own_cells := 0
+	for filled in m.rot_mask {
+		if filled do own_cells += 1
+	}
+	grid_cells := 0
+	for &cell in d.grid {
+		if cell.module_id == id do grid_cells += 1
+	}
+	imgui.TextColored(label_col, "Size:")
+	imgui.SameLine()
+	imgui.Text("%dx%d, %d cells", c.int(m.rot_width), c.int(m.rot_height), c.int(own_cells))
+	if grid_cells != own_cells {
+		imgui.TextColored({1.0, 0.8, 0.4, 1.0}, "Joined: %d cells total", c.int(grid_cells))
+	}
+
+	// ---- Groups ----
+	imgui.TextColored(label_col, "Groups:")
+	in_any := false
+	for &g in d.groups {
+		for gid in g.module_ids {
+			if gid != id do continue
+			imgui.SameLine()
+			imgui.Text("%s", fmt.ctprintf("%s", g.name))
+			in_any = true
+			break
+		}
+	}
+	if !in_any {
+		imgui.SameLine()
+		imgui.TextDisabled("none")
+	}
+
+	// ---- Doors ----
+	connected, two_sided := 0, 0
+	for di in 0 ..< len(m.rot_doors) {
+		if module_door_connected(m, di) do connected += 1
+		if module_door_two_sided(m, di) do two_sided += 1
+	}
+	imgui.Separator()
+	imgui.Text("Doors: %d slots, %d connected, %d two-sided",
+		c.int(len(m.rot_doors)), c.int(connected), c.int(two_sided))
+
+	table_flags := imgui.TableFlags_RowBg | imgui.TableFlags_BordersInnerH | imgui.TableFlags_SizingFixedFit
+	if imgui.BeginTable("##doors", 4, table_flags) {
+		imgui.TableSetupColumn("#")
+		imgui.TableSetupColumn("Cell")
+		imgui.TableSetupColumn("Dir")
+		imgui.TableSetupColumn("Status", {.WidthStretch})
+		imgui.TableHeadersRow()
+
+		for slot, di in m.rot_doors {
+			imgui.TableNextRow()
+			imgui.TableNextColumn()
+			imgui.Text("%d", c.int(di))
+			imgui.TableNextColumn()
+			dgx, dgy := door_global(slot, m.grid_x, m.grid_y)
+			imgui.Text("(%d, %d)", c.int(dgx), c.int(dgy))
+			imgui.TableNextColumn()
+			imgui.Text("%s", DIRECTION_NAMES[slot.direction])
+			imgui.TableNextColumn()
+			if module_door_two_sided(m, di) {
+				imgui.TextColored({1.0, 0.86, 0.2, 1.0}, "two-sided")
+			} else if module_door_connected(m, di) {
+				imgui.TextColored({0.3, 1.0, 0.5, 1.0}, "connected")
+			} else {
+				imgui.TextDisabled("unused")
+			}
+		}
+		imgui.EndTable()
+	}
+
+	imgui.TextDisabled("[Esc] or click empty space to close")
 }

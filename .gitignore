@@ -4,3 +4,7 @@ dungeon_generator
 
 # macOS
 .DS_Store
+
+# Windows build output
+*.exe
+*.pdb
