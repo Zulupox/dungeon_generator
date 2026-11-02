@@ -1,0 +1,79 @@
+{
+	"name": "Family Apartment",
+	"zones": ["public", "circulation", "semi_private", "private"],
+	"attempts": 200,
+	"room_types": [
+		{"name": "Entrance",   "zone": "public",       "count": [1, 1], "entry": true, "max_doors": 2,  "templates": ["Small Room"],                "color": [205, 190, 120, 255]},
+		{"name": "Hallway",    "zone": "circulation",  "count": [1, 2], "max_doors": 6,                 "templates": ["Long Hall"],                 "color": [150, 150, 165, 255]},
+		{"name": "LivingRoom", "zone": "public",       "count": [1, 1], "max_depth": 2, "pref_doors": 4, "templates": ["Grand Hall", "L-Shape"],    "color": [200, 160, 90, 255]},
+		{"name": "Kitchen",    "zone": "public",       "count": [1, 1], "max_depth": 3, "pref_doors": 3, "templates": ["Large Room", "L-Shape"],    "color": [210, 120, 70, 255]},
+		{"name": "DiningArea", "zone": "public",       "count": [0, 1], "max_doors": 3,                 "templates": ["Large Room"],                "color": [190, 140, 80, 255]},
+		{"name": "Bedroom",    "zone": "private",      "count": [2, 3], "max_doors": 2,                 "templates": ["Large Room", "L-Shape"],     "color": [110, 120, 190, 255]},
+		{"name": "Bathroom",   "zone": "private",      "count": [1, 1], "max_doors": 2,                 "templates": ["Small Room", "Large Room"],  "color": [80, 170, 180, 255]},
+		{"name": "Toilet",     "zone": "semi_private", "count": [1, 1], "max_doors": 1,                 "templates": ["Small Room"],                "color": [90, 150, 160, 255]},
+		{"name": "Laundry",    "zone": "private",      "count": [0, 1], "max_doors": 1,                 "templates": ["Small Room"],                "color": [130, 160, 190, 255]},
+		{"name": "Storage",    "zone": "semi_private", "count": [0, 1], "max_doors": 1,                 "templates": ["Small Room"],                "color": [140, 120, 100, 255]},
+		{"name": "Balcony",    "zone": "public",       "count": [0, 1], "max_doors": 1,                 "templates": ["Long Hall"],                 "color": [120, 180, 110, 255]}
+	],
+	"connections": [
+		{"a": "Entrance",   "b": "Hallway",    "weight": 100, "bonus": 50},
+		{"a": "Entrance",   "b": "LivingRoom", "weight": 60},
+		{"a": "Hallway",    "b": "Hallway",    "weight": 70},
+		{"a": "Hallway",    "b": "LivingRoom", "weight": 80},
+		{"a": "Hallway",    "b": "Kitchen",    "weight": 50},
+		{"a": "Hallway",    "b": "Bedroom",    "weight": 100, "bonus": 30},
+		{"a": "Hallway",    "b": "Bathroom",   "weight": 90},
+		{"a": "Hallway",    "b": "Toilet",     "weight": 90, "bonus": 20},
+		{"a": "Hallway",    "b": "Laundry",    "weight": 60},
+		{"a": "Hallway",    "b": "Storage",    "weight": 80},
+		{"a": "LivingRoom", "b": "Kitchen",    "weight": 90, "bonus": 40},
+		{"a": "LivingRoom", "b": "DiningArea", "weight": 90, "bonus": 20},
+		{"a": "Kitchen",    "b": "DiningArea", "weight": 80, "bonus": 20},
+		{"a": "LivingRoom", "b": "Balcony",    "weight": 70},
+		{"a": "Bedroom",    "b": "Bathroom",   "weight": 40, "bonus": 10},
+		{"a": "Bathroom",   "b": "Laundry",    "weight": 50}
+	],
+	"forbidden": [
+		{"a": "Kitchen",    "b": "Toilet"},
+		{"a": "Kitchen",    "b": "Bathroom"},
+		{"a": "Kitchen",    "b": "Bedroom"},
+		{"a": "Kitchen",    "b": "Balcony"},
+		{"a": "Entrance",   "b": "Bedroom"},
+		{"a": "Entrance",   "b": "Bathroom"},
+		{"a": "Entrance",   "b": "Kitchen"},
+		{"a": "Entrance",   "b": "Balcony"},
+		{"a": "Entrance",   "b": "DiningArea"},
+		{"a": "Toilet",     "b": "Bathroom"},
+		{"a": "Bedroom",    "b": "Bedroom"},
+		{"a": "Bathroom",   "b": "LivingRoom"},
+		{"a": "DiningArea", "b": "Toilet"},
+		{"a": "DiningArea", "b": "Bathroom"},
+		{"a": "Balcony",    "b": "Toilet"},
+		{"a": "Balcony",    "b": "Bathroom"}
+	],
+	"zone_transitions": [
+		{"a": "public",       "b": "public",       "weight": 40},
+		{"a": "public",       "b": "circulation",  "weight": 50},
+		{"a": "circulation",  "b": "semi_private", "weight": 60},
+		{"a": "circulation",  "b": "private",      "weight": 60},
+		{"a": "public",       "b": "semi_private", "weight": 10},
+		{"a": "public",       "b": "private",      "weight": 5},
+		{"a": "private",      "b": "private",      "weight": 10},
+		{"a": "semi_private", "b": "private",      "weight": 10},
+		{"a": "semi_private", "b": "semi_private", "weight": 5}
+	],
+	"only_via": [
+		{"room": "Bathroom", "via": "Kitchen", "score": -50},
+		{"room": "Bathroom", "via": "Bedroom", "score": -30},
+		{"room": "Bedroom",  "via": "Bedroom", "score": -40},
+		{"room": "Toilet",   "via": "Kitchen", "score": -50}
+	],
+	"scoring": {
+		"edge_weight": 40,
+		"zone_order": 20,
+		"depth_overflow": 30,
+		"door_overflow": 30,
+		"extra_edge_chance": 0.15,
+		"default_weight": 0
+	}
+}

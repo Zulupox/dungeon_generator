@@ -120,6 +120,9 @@ Dungeon :: struct {
 	mst_edges:        [dynamic]Corridor_Job,
 	loop_edges:       [dynamic]Corridor_Job,
 	placement_queue:  [dynamic]Placement_Target,
+
+	// Semantic room graphs from the last Room_Graph step, best first
+	room_graphs: [dynamic]Room_Graph,
 }
 
 // ---------------------------------------------------------------------------
@@ -156,6 +159,8 @@ dungeon_destroy :: proc(d: ^Dungeon) {
 	delete(d.mst_edges)
 	delete(d.loop_edges)
 	delete(d.placement_queue)
+	dungeon_clear_room_graphs(d)
+	delete(d.room_graphs)
 	recipe_destroy(&d.recipe)
 }
 
@@ -173,6 +178,7 @@ dungeon_reset :: proc(d: ^Dungeon) {
 	clear(&d.mst_edges)
 	clear(&d.loop_edges)
 	clear(&d.placement_queue)
+	dungeon_clear_room_graphs(d)
 	d.current_step = 0
 	d.step_progress = 0
 	d.step_done = false
@@ -371,5 +377,9 @@ dungeon_generate_step :: proc(d: ^Dungeon) {
 		execute_wall_border(d, &step.wall_border)
 	case .Connect_Linear:
 		execute_connect_linear(d, &step.connect_linear)
+	case .Room_Graph:
+		execute_room_graph(d, &step.room_graph)
+	case .Place_Graph:
+		execute_place_graph(d, &step.place_graph)
 	}
 }

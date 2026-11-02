@@ -1,5 +1,6 @@
 package dungeon_generator
 
+import "core:os"
 import rl "vendor:raylib"
 
 import imgui "libs/odin-imgui"
@@ -39,6 +40,14 @@ main :: proc() {
 		grid_height = 64,
 		cell_size   = 1.0,
 		wall_height = 1.5,
+	}
+
+	room_profiles_init()
+	defer room_profiles_destroy()
+
+	when GRAPH_SELFTEST {
+		templates_init()
+		os.exit(room_graph_selftest() && graph_placement_selftest() ? 0 : 1)
 	}
 
 	rl.InitWindow(1280, 800, "Procedural Dungeon Generator")
@@ -196,6 +205,9 @@ draw :: proc() {
 		draw_ui()
 	}
 
+	if state.show_ui && !state.editor.active {
+		draw_graph_window(&state.dungeon)
+	}
 	draw_inspector()
 	canvas_draw_imgui()
 

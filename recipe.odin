@@ -32,6 +32,8 @@ Step_Type :: enum {
 	Fill_Area,
 	Wall_Border,
 	Connect_Linear,
+	Room_Graph,
+	Place_Graph,
 }
 
 STEP_TYPE_NAMES := [Step_Type]cstring{
@@ -57,6 +59,8 @@ STEP_TYPE_NAMES := [Step_Type]cstring{
 	.Fill_Area        = "Fill Area",
 	.Wall_Border      = "Wall Border",
 	.Connect_Linear   = "Connect Linear",
+	.Room_Graph       = "Room Graph",
+	.Place_Graph      = "Place Graph",
 }
 
 Seed_Rooms_Params :: struct {
@@ -211,6 +215,18 @@ Connect_Linear_Params :: struct {
 	manhattan_weight: f32,  // A* corridor style (0.0 = organic, 1.0 = straight)
 }
 
+Room_Graph_Params :: struct {
+	profile:  string, // profile name (see profiles/*.json); "" = first profile
+	attempts: int,    // graphs to sample; 0 = use the profile's attempts
+}
+
+Place_Graph_Params :: struct {
+	manhattan_weight:  f32,  // corridor style for fallback corridors
+	corridor_fallback: bool, // allow corridors when a room can't dock to a neighbour
+	loop_corridors:    bool, // also carve corridors for loop edges whose rooms don't touch
+	retries:           int,  // layout attempts per graph before trying the next-best graph
+}
+
 // Gen_Step uses a flat struct with all param fields.
 // Only the fields relevant to the step type are used.
 // This makes JSON serialization straightforward.
@@ -236,6 +252,8 @@ Gen_Step :: struct {
 	fill_area:        Fill_Area_Params        `json:"fill_area"`,
 	wall_border:      Wall_Border_Params      `json:"wall_border"`,
 	connect_linear:   Connect_Linear_Params   `json:"connect_linear"`,
+	room_graph:       Room_Graph_Params       `json:"room_graph"`,
+	place_graph:      Place_Graph_Params      `json:"place_graph"`,
 	// Area constraint: -1 = no constraint (whole grid), >= 0 = constrain to area
 	area_id:         int                   `json:"area_id"`,
 	area_exclude:    bool                  `json:"area_exclude"`,
@@ -553,6 +571,9 @@ PRESET_NAMES := [?]cstring{
 	"Castle Courtyard",
 	"Fortified Temple",
 	"Temple Progression",
+	"Small Apartment",
+	"Family Apartment",
+	"Dungeon Keep",
 }
 
 recipe_garrison_compound :: proc() -> Recipe {
@@ -577,6 +598,19 @@ recipe_garrison_compound :: proc() -> Recipe {
 	return r
 }
 
+DEFAULT_PLACE_GRAPH :: Place_Graph_Params{manhattan_weight = 0.8, corridor_fallback = true, loop_corridors = false, retries = 10}
+
+// Room-graph driven layout from a profile in profiles/*.json
+recipe_room_graph :: proc(profile: string) -> Recipe {
+	r: Recipe
+	r.name = profile
+	r.seed = 0
+	s: Gen_Step
+	s = make_step(.Room_Graph);       s.room_graph = {profile = profile};                               append(&r.steps, s)
+	s = make_step(.Place_Graph);      s.place_graph = DEFAULT_PLACE_GRAPH;                              append(&r.steps, s)
+	return r
+}
+
 preset_recipe_by_index :: proc(index: int) -> Recipe {
 	switch index {
 	case 0:  return recipe_classic_dungeon()
@@ -596,6 +630,9 @@ preset_recipe_by_index :: proc(index: int) -> Recipe {
 	case 14: return recipe_castle_courtyard()
 	case 15: return recipe_fortified_temple()
 	case 16: return recipe_temple_progression()
+	case 17: return recipe_room_graph("Small Apartment")
+	case 18: return recipe_room_graph("Family Apartment")
+	case 19: return recipe_room_graph("Dungeon Keep")
 	}
 	return recipe_classic_dungeon()
 }
@@ -628,6 +665,8 @@ Json_Step :: struct {
 	fill_area:        Fill_Area_Params        `json:"fill_area"`,
 	wall_border:      Wall_Border_Params      `json:"wall_border"`,
 	connect_linear:   Connect_Linear_Params   `json:"connect_linear"`,
+	room_graph:       Room_Graph_Params       `json:"room_graph"`,
+	place_graph:      Place_Graph_Params      `json:"place_graph"`,
 	area_id:         int                   `json:"area_id"`,
 	area_exclude:    bool                  `json:"area_exclude"`,
 	group:           string                `json:"group"`,
@@ -664,6 +703,8 @@ step_type_to_string :: proc(t: Step_Type) -> string {
 	case .Fill_Area:        return "Fill_Area"
 	case .Wall_Border:      return "Wall_Border"
 	case .Connect_Linear:   return "Connect_Linear"
+	case .Room_Graph:       return "Room_Graph"
+	case .Place_Graph:      return "Place_Graph"
 	}
 	return "Unknown"
 }
@@ -692,6 +733,8 @@ string_to_step_type :: proc(s: string) -> (Step_Type, bool) {
 	case "Fill_Area":        return .Fill_Area, true
 	case "Wall_Border":      return .Wall_Border, true
 	case "Connect_Linear":   return .Connect_Linear, true
+	case "Room_Graph":       return .Room_Graph, true
+	case "Place_Graph":      return .Place_Graph, true
 	}
 	return .Seed_Rooms, false
 }
@@ -725,6 +768,8 @@ recipe_save :: proc(recipe: ^Recipe, filepath: string) -> bool {
 			fill_area        = s.fill_area,
 			wall_border      = s.wall_border,
 			connect_linear   = s.connect_linear,
+			room_graph       = s.room_graph,
+			place_graph      = s.place_graph,
 			area_id         = s.area_id,
 			area_exclude    = s.area_exclude,
 			group           = s.group,
@@ -789,6 +834,8 @@ recipe_load :: proc(filepath: string) -> (Recipe, bool) {
 			fill_area        = js.fill_area,
 			wall_border      = js.wall_border,
 			connect_linear   = js.connect_linear,
+			room_graph       = js.room_graph,
+			place_graph      = js.place_graph,
 			area_id         = js.area_id,
 			area_exclude    = js.area_exclude,
 			group           = js.group,

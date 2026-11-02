@@ -46,7 +46,7 @@ ADD_STEP_OPTIONS := [?]cstring{
 	"Place Grid", "Room Corridor", "Define Area", "Pack Rooms",
 	"Join Rooms", "Connect Doors", "Place Specific", "Mirror Rooms",
 	"Place Symmetric", "Place Perimeter", "Place Along Line",
-	"Fill Area", "Wall Border", "Connect Linear",
+	"Fill Area", "Wall Border", "Connect Linear", "Room Graph", "Place Graph",
 }
 ADD_STEP_TYPES := [?]Step_Type{
 	.Seed_Rooms, .Grow_Clusters, .Connect_MST, .Mark_Doors,
@@ -54,7 +54,7 @@ ADD_STEP_TYPES := [?]Step_Type{
 	.Place_Grid, .Room_Corridor, .Define_Area, .Pack_Rooms,
 	.Join_Rooms, .Connect_Doors, .Place_Specific, .Mirror_Rooms,
 	.Place_Symmetric, .Place_Perimeter, .Place_Along_Line,
-	.Fill_Area, .Wall_Border, .Connect_Linear,
+	.Fill_Area, .Wall_Border, .Connect_Linear, .Room_Graph, .Place_Graph,
 }
 
 // Grid size options
@@ -86,6 +86,8 @@ STEP_TYPE_COLORS := [Step_Type]rl.Color{
 	.Fill_Area        = {180, 160, 120, 255},
 	.Wall_Border      = {140, 130, 110, 255},
 	.Connect_Linear   = {120, 180, 255, 255},
+	.Room_Graph       = {255, 230, 120, 255},
+	.Place_Graph      = {255, 200, 90, 255},
 }
 
 // ---------------------------------------------------------------------------
@@ -190,6 +192,13 @@ ui_step_params :: proc(step: ^Gen_Step) {
 		ui_drag_int("Thickness", &step.wall_border.thickness, 1, 5)
 	case .Connect_Linear:
 		imgui.SliderFloat("Manhattan", &step.connect_linear.manhattan_weight, 0.0, 1.0)
+	case .Room_Graph:
+		ui_room_graph_params(&step.room_graph)
+	case .Place_Graph:
+		imgui.SliderFloat("Manhattan", &step.place_graph.manhattan_weight, 0.0, 1.0)
+		imgui.Checkbox("Corridor fallback", &step.place_graph.corridor_fallback)
+		imgui.Checkbox("Loop corridors", &step.place_graph.loop_corridors)
+		ui_drag_int("Retries", &step.place_graph.retries, 1, 50)
 	}
 
 	// Area constraint (for all steps except Define_Area)
@@ -431,6 +440,10 @@ draw_ui :: proc() {
 					new_step.wall_border = {thickness = 2}
 				case .Connect_Linear:
 					new_step.connect_linear = {manhattan_weight = 0.8}
+				case .Room_Graph:
+					if len(room_profiles) > 0 do new_step.room_graph.profile = room_profiles[0].name
+				case .Place_Graph:
+					new_step.place_graph = DEFAULT_PLACE_GRAPH
 				}
 				append(&d.recipe.steps, new_step)
 			}
@@ -480,6 +493,12 @@ draw_ui :: proc() {
 		select_modules_tab = false
 		if imgui.BeginTabItem("Modules", nil, modules_tab_flags) {
 			ui_module_table()
+			imgui.EndTabItem()
+		}
+
+		// ---- Graph tab ----
+		if imgui.BeginTabItem("Graph") {
+			ui_graph_tab(d)
 			imgui.EndTabItem()
 		}
 
@@ -551,7 +570,10 @@ ui_module_table :: proc() {
 
 // Name/stat labels under each showcased module, drawn behind the UI panel.
 draw_module_labels :: proc(d: ^Dungeon, camera: rl.Camera3D) {
-	if !d.showcase do return
+	if !d.showcase {
+		draw_graph_room_labels(d, camera)
+		return
+	}
 
 	draw_list := imgui.GetBackgroundDrawList()
 	forward := rl.Vector3Normalize(camera.target - camera.position)
@@ -640,6 +662,23 @@ draw_inspector :: proc() {
 	imgui.ColorButton("##col", color4_to_vec4(tmpl.color), {.NoTooltip}, {12, 12})
 	imgui.SameLine()
 	imgui.Text("%s", fmt.ctprintf("%s  (template %d)", tmpl.name, m.template_index))
+
+	// ---- Room graph ----
+	if g, node, ok := graph_node_for_module(d, id); ok {
+		p := &room_profiles[g.profile]
+		t := &p.types[g.nodes[node].type]
+		imgui.TextColored(label_col, "Room:")
+		imgui.SameLine()
+		imgui.TextColored(zone_color(t.zone), "%s", graph_node_label(p, g, node))
+		imgui.SameLine()
+		imgui.TextColored(label_col, "(%s, depth %d)", fmt.ctprintf("%s", p.zones[t.zone]), c.int(g.nodes[node].depth))
+		for e in g.edges {
+			other := e.a == node ? e.b : e.b == node ? e.a : -1
+			if other < 0 do continue
+			status: cstring = e.realized ? "" : "  (not connected)"
+			imgui.TextColored(e.realized ? label_col : imgui.Vec4{0.9, 0.5, 0.45, 1}, "  -> %s%s", graph_node_label(p, g, other), status)
+		}
+	}
 
 	// ---- Origin ----
 	imgui.TextColored(label_col, "Placed by:")
