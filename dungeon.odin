@@ -102,6 +102,7 @@ Dungeon :: struct {
 	step_done:     bool,  // current step is complete, advance on next call
 	gen_done:      bool,  // all steps complete
 	actual_seed:   u64,   // the seed that was actually used (for display)
+	showcase:      bool,  // grid holds the module showcase, not a generated dungeon
 
 	// Area system
 	areas:               [dynamic]Dungeon_Area,
@@ -174,6 +175,7 @@ dungeon_reset :: proc(d: ^Dungeon) {
 	d.step_progress = 0
 	d.step_done = false
 	d.gen_done = false
+	d.showcase = false
 	d.active_area_id = -1
 	d.active_area_exclude = false
 	d.active_group = ""

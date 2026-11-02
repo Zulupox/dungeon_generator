@@ -223,7 +223,9 @@ draw_ui :: proc() {
 	imgui.Text("Camera:     %s", cam_text)
 
 	gen_text: cstring
-	if d.gen_done {
+	if d.showcase {
+		gen_text = "Module showcase"
+	} else if d.gen_done {
 		gen_text = "Done"
 	} else if d.current_step < len(d.recipe.steps) {
 		gen_text = STEP_TYPE_NAMES[d.recipe.steps[d.current_step].type]
@@ -257,6 +259,10 @@ draw_ui :: proc() {
 	if imgui.Button("Reset", {half_width, 0}) {
 		dungeon_reset(d)
 		d.gen_done = true
+	}
+	if imgui.Button("Modules", {half_width, 0}) {
+		dungeon_show_modules(d)
+		select_modules_tab = true
 	}
 
 	imgui.Separator()
@@ -458,6 +464,14 @@ draw_ui :: proc() {
 			imgui.EndTabItem()
 		}
 
+		// ---- Modules tab ----
+		modules_tab_flags: imgui.TabItemFlags = select_modules_tab ? {.SetSelected} : {}
+		select_modules_tab = false
+		if imgui.BeginTabItem("Modules", nil, modules_tab_flags) {
+			ui_module_table()
+			imgui.EndTabItem()
+		}
+
 		// ---- Controls tab ----
 		if imgui.BeginTabItem("Keys") {
 			imgui.TextColored({0.5, 0.5, 0.6, 1.0}, "[Tab]   Toggle camera")
@@ -475,3 +489,96 @@ draw_ui :: proc() {
 
 // Expose gen_step_interval for the slider to work
 gen_step_interval: f32 = 0.05
+
+// One-shot request to switch to the Modules tab (set by the Modules button)
+select_modules_tab: bool = false
+
+// ---------------------------------------------------------------------------
+// Module info
+// ---------------------------------------------------------------------------
+
+color4_to_vec4 :: proc(col: Color4) -> imgui.Vec4 {
+	return {f32(col[0]) / 255.0, f32(col[1]) / 255.0, f32(col[2]) / 255.0, f32(col[3]) / 255.0}
+}
+
+// Table of all module templates with their stats. Hover a row for door directions.
+ui_module_table :: proc() {
+	table_flags := imgui.TableFlags_RowBg | imgui.TableFlags_BordersInnerH | imgui.TableFlags_SizingFixedFit
+	if !imgui.BeginTable("##modules", 4, table_flags) do return
+	defer imgui.EndTable()
+
+	imgui.TableSetupColumn("Name", {.WidthStretch})
+	imgui.TableSetupColumn("Size")
+	imgui.TableSetupColumn("Cells")
+	imgui.TableSetupColumn("Doors")
+	imgui.TableHeadersRow()
+
+	for &tmpl, i in MODULE_TEMPLATES {
+		imgui.PushIDInt(c.int(i))
+		imgui.TableNextRow()
+
+		imgui.TableNextColumn()
+		imgui.ColorButton("##col", color4_to_vec4(tmpl.color), {.NoTooltip}, {12, 12})
+		imgui.SameLine()
+		imgui.Text("%d. %s", c.int(i), fmt.ctprintf("%s", tmpl.name))
+		if imgui.IsItemHovered() {
+			doors := template_door_counts(&tmpl)
+			imgui.SetTooltip("Doors  N:%d  S:%d  E:%d  W:%d",
+				c.int(doors[.North]), c.int(doors[.South]), c.int(doors[.East]), c.int(doors[.West]))
+		}
+
+		imgui.TableNextColumn()
+		imgui.Text("%dx%d", c.int(tmpl.width), c.int(tmpl.height))
+		imgui.TableNextColumn()
+		imgui.Text("%d", c.int(template_cell_count(&tmpl)))
+		imgui.TableNextColumn()
+		imgui.Text("%d", c.int(len(tmpl.door_slots)))
+
+		imgui.PopID()
+	}
+}
+
+// Name/stat labels under each showcased module, drawn behind the UI panel.
+draw_module_labels :: proc(d: ^Dungeon, camera: rl.Camera3D) {
+	if !d.showcase do return
+
+	draw_list := imgui.GetBackgroundDrawList()
+	forward := rl.Vector3Normalize(camera.target - camera.position)
+	cs := d.config.cell_size
+	name_col := imgui.ColorConvertFloat4ToU32({1, 1, 1, 1})
+	stat_col := imgui.ColorConvertFloat4ToU32({0.7, 0.7, 0.75, 1})
+
+	for &m in d.modules {
+		tmpl := &MODULE_TEMPLATES[m.template_index]
+		// Anchor just past the module's south edge, on the floor
+		world := rl.Vector3{m.center_x * cs, 0, (f32(m.grid_y + m.rot_height) + 0.3) * cs}
+
+		// Skip modules behind the camera (freeflight)
+		if rl.Vector3DotProduct(world - camera.position, forward) <= 0 do continue
+
+		screen := rl.GetWorldToScreen(world, camera)
+		lines := [3]cstring{
+			fmt.ctprintf("%s", tmpl.name),
+			fmt.ctprintf("%dx%d, %d cells", tmpl.width, tmpl.height, template_cell_count(tmpl)),
+			fmt.ctprintf("%d doors", len(tmpl.door_slots)),
+		}
+
+		box_w: f32 = 0
+		box_h: f32 = 6
+		for line in lines {
+			size := imgui.CalcTextSize(line)
+			box_w = max(box_w, size.x + 8)
+			box_h += size.y
+		}
+		top_left := imgui.Vec2{screen.x - box_w * 0.5, screen.y}
+		imgui.DrawList_AddRectFilled(draw_list, top_left, {top_left.x + box_w, top_left.y + box_h},
+			imgui.ColorConvertFloat4ToU32({0, 0, 0, 0.65}), 3)
+
+		y := top_left.y + 3
+		for line, li in lines {
+			size := imgui.CalcTextSize(line)
+			imgui.DrawList_AddText(draw_list, {screen.x - size.x * 0.5, y}, li == 0 ? name_col : stat_col, line)
+			y += size.y
+		}
+	}
+}

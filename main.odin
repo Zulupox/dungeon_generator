@@ -71,6 +71,8 @@ main :: proc() {
 
 		update(dt)
 		draw()
+
+		free_all(context.temp_allocator)
 	}
 
 	dungeon_destroy(&state.dungeon)
@@ -167,6 +169,8 @@ draw :: proc() {
 	rl.EndMode3D()
 
 	rl.EndScissorMode()
+
+	draw_module_labels(&state.dungeon, rl_camera)
 
 	if state.show_ui {
 		draw_ui()

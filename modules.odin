@@ -524,3 +524,69 @@ stamp_module_raw :: proc(d: ^Dungeon, mask: [dynamic]bool, doors: [dynamic]Door_
 
 	return module_id
 }
+
+// ---------------------------------------------------------------------------
+// Module showcase
+// ---------------------------------------------------------------------------
+
+SHOWCASE_SLOT_W     :: 9 // cells per column, wide enough for the label under each module
+SHOWCASE_MAX_COLS   :: 4
+SHOWCASE_LABEL_ROWS :: 4 // empty cells below each row, where the labels go
+
+// Clear the dungeon and place one of each module template (unrotated) in a grid of
+// fixed-width slots, centered on the grid. All door slots are marked connected so they render.
+dungeon_show_modules :: proc(d: ^Dungeon) {
+	dungeon_reset(d)
+	d.gen_done = true
+	d.showcase = true
+
+	gw := d.config.grid_width
+	gh := d.config.grid_height
+	count := len(MODULE_TEMPLATES)
+	cols := clamp((gw - 2) / SHOWCASE_SLOT_W, 1, SHOWCASE_MAX_COLS)
+	rows := (count + cols - 1) / cols
+
+	// Row heights from the tallest module in each row
+	row_y: [len(MODULE_TEMPLATES)]int
+	total_h := 0
+	for row in 0 ..< rows {
+		row_y[row] = total_h
+		row_h := 0
+		for i in row * cols ..< min((row + 1) * cols, count) {
+			row_h = max(row_h, MODULE_TEMPLATES[i].height)
+		}
+		total_h += row_h + SHOWCASE_LABEL_ROWS
+	}
+	off_x := max((gw - cols * SHOWCASE_SLOT_W) / 2, 0)
+	off_y := max((gh - total_h) / 2, 0)
+
+	for &tmpl, i in MODULE_TEMPLATES {
+		col := i % cols
+		gx := off_x + col * SHOWCASE_SLOT_W + (SHOWCASE_SLOT_W - tmpl.width) / 2
+		gy := off_y + row_y[i / cols]
+		if !can_place_module(d, tmpl.mask, tmpl.width, tmpl.height, gx, gy) do continue
+		id := stamp_module(d, i, gx, gy, .R0)
+		m := &d.modules[id]
+		for di in 0 ..< len(m.rot_doors) {
+			append(&m.connected_doors, di)
+		}
+	}
+}
+
+// Number of occupied cells in a template's mask.
+template_cell_count :: proc(tmpl: ^Module_Template) -> int {
+	n := 0
+	for filled in tmpl.mask {
+		if filled do n += 1
+	}
+	return n
+}
+
+// Number of door slots facing each direction.
+template_door_counts :: proc(tmpl: ^Module_Template) -> [Direction]int {
+	counts: [Direction]int
+	for slot in tmpl.door_slots {
+		counts[slot.direction] += 1
+	}
+	return counts
+}
