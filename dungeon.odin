@@ -146,6 +146,9 @@ Dungeon :: struct {
 
 	// Semantic room graphs from the last Room_Graph step, best first
 	room_graphs: [dynamic]Room_Graph,
+
+	// Start, boss, locks, keys and treasure from the last Assign Roles step
+	roles: Dungeon_Roles,
 }
 
 // ---------------------------------------------------------------------------
@@ -185,6 +188,7 @@ dungeon_destroy :: proc(d: ^Dungeon) {
 	dungeon_clear_room_graphs(d)
 	delete(d.room_graphs)
 	palette_destroy(&d.palette)
+	roles_destroy(&d.roles)
 	recipe_destroy(&d.recipe)
 }
 
@@ -213,6 +217,7 @@ dungeon_reset :: proc(d: ^Dungeon) {
 	d.active_area_exclude = false
 	d.active_group = ""
 	d.active_source_group = ""
+	roles_clear(&d.roles)
 	// Reset palette
 	palette_reset(&d.palette)
 	d.room_type_counts = {}
@@ -412,5 +417,7 @@ dungeon_generate_step :: proc(d: ^Dungeon) {
 		execute_define_palette(d, &step.define_palette)
 	case .Connect_Groups:
 		execute_connect_groups(d, &step.connect_groups)
+	case .Assign_Roles:
+		execute_assign_roles(d, &step.assign_roles)
 	}
 }

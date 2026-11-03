@@ -57,7 +57,7 @@ ADD_STEP_OPTIONS := [?]cstring{
 	"Join Rooms", "Connect Doors", "Place Specific", "Mirror Rooms",
 	"Place Symmetric", "Place Perimeter", "Place Along Line",
 	"Fill Area", "Wall Border", "Connect Linear", "Room Graph", "Place Graph",
-	"Define Palette", "Connect Groups",
+	"Define Palette", "Connect Groups", "Assign Roles",
 }
 ADD_STEP_TYPES := [?]Step_Type{
 	.Seed_Rooms, .Grow_Clusters, .Connect_MST, .Mark_Doors,
@@ -66,7 +66,7 @@ ADD_STEP_TYPES := [?]Step_Type{
 	.Join_Rooms, .Connect_Doors, .Place_Specific, .Mirror_Rooms,
 	.Place_Symmetric, .Place_Perimeter, .Place_Along_Line,
 	.Fill_Area, .Wall_Border, .Connect_Linear, .Room_Graph, .Place_Graph,
-	.Define_Palette, .Connect_Groups,
+	.Define_Palette, .Connect_Groups, .Assign_Roles,
 }
 
 // Grid size options
@@ -102,6 +102,7 @@ STEP_TYPE_COLORS := [Step_Type]rl.Color{
 	.Place_Graph      = {255, 200, 90, 255},
 	.Define_Palette   = {220, 200, 140, 255},
 	.Connect_Groups   = {140, 220, 255, 255},
+	.Assign_Roles     = {255, 120, 120, 255},
 }
 
 // ---------------------------------------------------------------------------
@@ -204,6 +205,10 @@ ui_step_params :: proc(step: ^Gen_Step) {
 		ui_drag_int("Blue", &step.fill_area.color_b, 0, 255)
 	case .Wall_Border:
 		ui_drag_int("Thickness", &step.wall_border.thickness, 1, 5)
+	case .Assign_Roles:
+		ui_drag_int("Locks", &step.assign_roles.locks, 0, MAX_LOCKS)
+		if imgui.IsItemHovered() do imgui.SetTooltip("Locked doors between start and boss, each with a key.\nOnly placed where every route must pass, so loopy\nlayouts may get fewer than asked for.")
+		ui_drag_int("Treasure", &step.assign_roles.treasure, 0, 10)
 	case .Connect_Groups:
 		imgui.SliderFloat("Manhattan", &step.connect_groups.manhattan_weight, 0.0, 1.0)
 	case .Connect_Linear:
@@ -473,6 +478,8 @@ draw_ui :: proc() {
 					new_step.fill_area = {color_r = 120, color_g = 100, color_b = 70}
 				case .Wall_Border:
 					new_step.wall_border = {thickness = 2}
+				case .Assign_Roles:
+					new_step.assign_roles = DEFAULT_ASSIGN_ROLES
 				case .Connect_Groups:
 					new_step.connect_groups = {manhattan_weight = 0.8}
 				case .Connect_Linear:
@@ -518,6 +525,8 @@ draw_ui :: proc() {
 
 			imgui.SliderFloat("Wall Height", &d.config.wall_height, 0.5, 4.0)
 			imgui.Checkbox("Show Ceilings", &show_ceilings)
+			imgui.Checkbox("Show Roles", &show_roles)
+			if imgui.IsItemHovered() do imgui.SetTooltip("Start, boss, keys, locks and treasure\nfrom an Assign Roles step")
 			imgui.Checkbox("Merge Room Walls", &merge_room_walls)
 			if imgui.IsItemHovered() do imgui.SetTooltip("Hide walls between touching rooms.\nDisplay only; the Join Rooms step merges rooms for real.")
 			imgui.Separator()
@@ -850,6 +859,14 @@ draw_inspector :: proc() {
 	imgui.ColorButton("##col", color4_to_vec4(tmpl.color), {.NoTooltip}, {12, 12})
 	imgui.SameLine()
 	imgui.Text("%s", fmt.ctprintf("%s  (template %d)", tmpl.name, m.template_index))
+
+	// ---- Role ----
+	if role, key := module_role(d, id); role != .None {
+		imgui.TextColored(label_col, "Role:")
+		imgui.SameLine()
+		text := role == .Key ? fmt.ctprintf("Key %d (opens lock %d)", key + 1, key + 1) : fmt.ctprintf("%v", role)
+		imgui.TextColored(color_to_vec4(role_color(role, key)), "%s", text)
+	}
 
 	// ---- Room graph ----
 	if g, node, ok := graph_node_for_module(d, id); ok {

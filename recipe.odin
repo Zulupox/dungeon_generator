@@ -36,6 +36,7 @@ Step_Type :: enum {
 	Place_Graph,
 	Define_Palette,
 	Connect_Groups,
+	Assign_Roles,
 }
 
 STEP_TYPE_NAMES := [Step_Type]cstring{
@@ -65,6 +66,7 @@ STEP_TYPE_NAMES := [Step_Type]cstring{
 	.Place_Graph      = "Place Graph",
 	.Define_Palette   = "Define Palette",
 	.Connect_Groups   = "Connect Groups",
+	.Assign_Roles     = "Assign Roles",
 }
 
 Seed_Rooms_Params :: struct {
@@ -220,6 +222,12 @@ Connect_Groups_Params :: struct {
 	manhattan_weight: f32,  // A* corridor style (0.0 = organic, 1.0 = straight)
 }
 
+// Assign_Roles picks start, boss, locks with keys, and treasure on the finished layout.
+Assign_Roles_Params :: struct {
+	locks:    int, // locked doors (each with a key) between start and boss, 0-4
+	treasure: int, // treasure rooms: dead ends off the main path
+}
+
 Connect_Linear_Params :: struct {
 	manhattan_weight: f32,  // A* corridor style (0.0 = organic, 1.0 = straight)
 }
@@ -278,6 +286,7 @@ Gen_Step :: struct {
 	place_graph:      Place_Graph_Params      `json:"place_graph"`,
 	define_palette:   Define_Palette_Params   `json:"define_palette"`,
 	connect_groups:   Connect_Groups_Params   `json:"connect_groups"`,
+	assign_roles:     Assign_Roles_Params     `json:"assign_roles"`,
 	// Area constraint: -1 = no constraint (whole grid), >= 0 = constrain to area
 	area_id:         int                   `json:"area_id"`,
 	area_exclude:    bool                  `json:"area_exclude"`,
@@ -337,6 +346,8 @@ recipe_classic_dungeon :: proc() -> Recipe {
 	s = make_step(.Grow_Clusters);    s.grow_clusters = {chance = 0.4, min_rooms = 1, max_rooms = 4};   append(&r.steps, s)
 	s = make_step(.Connect_MST);      s.connect_mst = {manhattan_weight = 0.8};                         append(&r.steps, s)
 	s = make_step(.Mark_Doors);                                                                         append(&r.steps, s)
+	// Start, boss, keys with locked doors, and treasure
+	s = make_step(.Assign_Roles);      s.assign_roles = DEFAULT_ASSIGN_ROLES;                                                append(&r.steps, s)
 	return r
 }
 
@@ -373,6 +384,8 @@ recipe_mega_complex :: proc() -> Recipe {
 	s = make_step(.Seed_Rooms);       s.seed_rooms = {count = 6};                                       append(&r.steps, s)
 	s = make_step(.Connect_MST);      s.connect_mst = {manhattan_weight = 0.5};                         append(&r.steps, s)
 	s = make_step(.Mark_Doors);                                                                         append(&r.steps, s)
+	// Start, boss, keys with locked doors, and treasure
+	s = make_step(.Assign_Roles);      s.assign_roles = DEFAULT_ASSIGN_ROLES;                                                append(&r.steps, s)
 	return r
 }
 
@@ -411,6 +424,8 @@ recipe_organic_caverns :: proc() -> Recipe {
 	s = make_step(.Connect_MST);      s.connect_mst = {manhattan_weight = 0.0};                                              append(&r.steps, s)
 	s = make_step(.Add_Loops);        s.add_loops = {loop_chance = 0.5, max_extra = 6, manhattan_weight = 0.0};              append(&r.steps, s)
 	s = make_step(.Mark_Doors);                                                                                              append(&r.steps, s)
+	// Start, boss, keys with locked doors, and treasure
+	s = make_step(.Assign_Roles);      s.assign_roles = DEFAULT_ASSIGN_ROLES;                                                append(&r.steps, s)
 	return r
 }
 
@@ -590,6 +605,8 @@ recipe_temple_progression :: proc() -> Recipe {
 	s = make_step(.Connect_Doors);     s.connect_doors = {mode = .Minimal, max_per_pair = 1};                                    append(&r.steps, s)
 	// Mark corridor-facing doors
 	s = make_step(.Mark_Doors);                                                                                                   append(&r.steps, s)
+	// Start, boss, keys with locked doors, and treasure
+	s = make_step(.Assign_Roles);      s.assign_roles = DEFAULT_ASSIGN_ROLES;                                                append(&r.steps, s)
 	return r
 }
 
@@ -651,8 +668,19 @@ recipe_room_graph :: proc(profile: string) -> Recipe {
 	s: Gen_Step
 	s = make_step(.Room_Graph);       s.room_graph = {profile = profile};                               append(&r.steps, s)
 	s = make_step(.Place_Graph);      s.place_graph = DEFAULT_PLACE_GRAPH;                              append(&r.steps, s)
+	// Profiles that name a start, boss or treasure room get roles assigned
+	for &p in room_profiles {
+		if p.name != profile do continue
+		for &t in p.types {
+			if t.role == .None do continue
+			s = make_step(.Assign_Roles); s.assign_roles = DEFAULT_ASSIGN_ROLES;                         append(&r.steps, s)
+			return r
+		}
+	}
 	return r
 }
+
+DEFAULT_ASSIGN_ROLES :: Assign_Roles_Params{locks = 2, treasure = 2}
 
 // Royal Castle - full showcase of the palette system with distinct functional zones.
 // Throne room at center, guard rooms at gates, kitchens near dining halls,
@@ -690,6 +718,8 @@ recipe_royal_castle :: proc() -> Recipe {
 	// Corridors between the wall ring and the rooms inside, which no doors join
 	s = make_step(.Connect_Groups);    s.connect_groups = {manhattan_weight = 0.8};                                            append(&r.steps, s)
 
+	// Start, boss, keys with locked doors, and treasure
+	s = make_step(.Assign_Roles);      s.assign_roles = DEFAULT_ASSIGN_ROLES;                                                append(&r.steps, s)
 	return r
 }
 
@@ -752,6 +782,7 @@ Json_Step :: struct {
 	place_graph:      Place_Graph_Params      `json:"place_graph"`,
 	define_palette:   Define_Palette_Params   `json:"define_palette"`,
 	connect_groups:   Connect_Groups_Params   `json:"connect_groups"`,
+	assign_roles:     Assign_Roles_Params     `json:"assign_roles"`,
 	area_id:         int                   `json:"area_id"`,
 	area_exclude:    bool                  `json:"area_exclude"`,
 	muted:           bool                  `json:"muted"`,
@@ -793,6 +824,7 @@ step_type_to_string :: proc(t: Step_Type) -> string {
 	case .Place_Graph:      return "Place_Graph"
 	case .Define_Palette:   return "Define_Palette"
 	case .Connect_Groups:   return "Connect_Groups"
+	case .Assign_Roles:     return "Assign_Roles"
 	}
 	return "Unknown"
 }
@@ -825,6 +857,7 @@ string_to_step_type :: proc(s: string) -> (Step_Type, bool) {
 	case "Place_Graph":      return .Place_Graph, true
 	case "Define_Palette":   return .Define_Palette, true
 	case "Connect_Groups":   return .Connect_Groups, true
+	case "Assign_Roles":     return .Assign_Roles, true
 	}
 	return .Seed_Rooms, false
 }
@@ -862,6 +895,7 @@ recipe_save :: proc(recipe: ^Recipe, filepath: string) -> bool {
 			place_graph      = s.place_graph,
 			define_palette   = s.define_palette,
 			connect_groups   = s.connect_groups,
+			assign_roles     = s.assign_roles,
 			area_id         = s.area_id,
 			area_exclude    = s.area_exclude,
 			muted           = s.muted,
@@ -931,6 +965,7 @@ recipe_load :: proc(filepath: string) -> (Recipe, bool) {
 			place_graph      = js.place_graph,
 			define_palette   = js.define_palette,
 			connect_groups   = js.connect_groups,
+			assign_roles     = js.assign_roles,
 			area_id         = js.area_id,
 			area_exclude    = js.area_exclude,
 			muted           = js.muted,

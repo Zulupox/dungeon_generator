@@ -11,9 +11,9 @@
 		{"name": "Kitchen",    "zone": "public",      "count": [0, 1], "max_doors": 2,                  "template_types": ["Kitchen"],         "color": [200, 120, 60, 255]},
 		{"name": "Armory",     "zone": "restricted",  "count": [1, 1], "max_doors": 1,                  "template_types": ["Armory"],          "color": [120, 130, 150, 255]},
 		{"name": "Prison",     "zone": "restricted",  "count": [0, 1], "max_doors": 2,                  "templates": ["Long Hall", "L-Shape"], "color": [90, 90, 100, 255]},
-		{"name": "Treasury",   "zone": "sanctum",     "count": [1, 1], "max_doors": 1,                  "template_types": ["Treasury"],        "color": [220, 190, 60, 255]},
+		{"name": "Treasury",   "zone": "sanctum",     "count": [1, 1], "max_doors": 1, "role": "treasure",                  "template_types": ["Treasury"],        "color": [220, 190, 60, 255]},
 		{"name": "Crypt",      "zone": "sanctum",     "count": [0, 1], "max_doors": 2,                  "templates": ["Cross", "Large Room"],  "color": [110, 80, 140, 255]},
-		{"name": "ThroneRoom", "zone": "sanctum",     "count": [1, 1], "max_doors": 3,                  "template_types": ["Throne_Room"],     "color": [160, 40, 40, 255]}
+		{"name": "ThroneRoom", "zone": "sanctum",     "count": [1, 1], "max_doors": 3, "role": "boss",                  "template_types": ["Throne_Room"],     "color": [160, 40, 40, 255]}
 	],
 	"connections": [
 		{"a": "Gate",       "b": "GuardRoom",  "weight": 100, "bonus": 40},

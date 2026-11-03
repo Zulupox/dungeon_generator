@@ -30,6 +30,7 @@ Room_Type_Def :: struct {
 	max_depth:  int,      // max hops from the entry, scored as depth_overflow, 0 = none
 	templates:  []string, // module template names this room may use
 	template_types: []Room_Type, // plus every template whose room_type is listed here
+	role:       Room_Role, // Assign Roles uses this room as start, boss or treasure
 	color:      Color4,
 }
 
@@ -393,6 +394,7 @@ Json_Room_Type :: struct {
 	max_depth:  int       `json:"max_depth"`,
 	templates:  []string  `json:"templates"`,
 	template_types: []string `json:"template_types"`, // Room_Type names, e.g. "Guard_Room"
+	role:       string    `json:"role"`, // "start", "boss" or "treasure"
 	color:      [4]u8     `json:"color"`,
 }
 
@@ -472,6 +474,11 @@ room_profile_load :: proc(filepath: string) -> (p: Room_Profile, ok: bool) {
 			if rt, rt_ok := reflect.enum_from_name(Room_Type, name); rt_ok do append(&template_types, rt)
 		}
 		t.template_types = template_types[:]
+		switch jt.role {
+		case "start":    t.role = .Start
+		case "boss":     t.role = .Boss
+		case "treasure": t.role = .Treasure
+		}
 		append(&types, t)
 		append(&type_names, jt.name)
 	}

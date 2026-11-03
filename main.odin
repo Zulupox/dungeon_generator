@@ -194,6 +194,7 @@ draw :: proc() {
 	render_grid_outline(&state.dungeon)
 	render_areas(&state.dungeon)
 	stats_render_3d(&state.dungeon)
+	roles_render_3d(&state.dungeon)
 	if state.editor.active {
 		editor_render_3d(&state.dungeon)
 	} else {
@@ -205,6 +206,7 @@ draw :: proc() {
 	rl.EndScissorMode()
 
 	draw_module_labels(&state.dungeon, rl_camera)
+	roles_draw_labels(&state.dungeon, rl_camera)
 
 	if state.show_ui {
 		draw_ui()

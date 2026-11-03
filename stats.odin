@@ -12,10 +12,8 @@ import imgui "libs/odin-imgui"
 // ---------------------------------------------------------------------------
 // Dungeon analysis: connectivity and layout stats
 //
-// Follows the Merge Room Walls display setting, so the stats match what you see:
-// - on:  any two touching room or corridor cells connect
-// - off: corridor cells connect freely, cells of the same room connect, and anything
-//        else (room to room, room to corridor) only through a connected door on that edge
+// Connections follow the Merge Room Walls display setting, so the stats match what you
+// see (the layout graph and its connection rule are in layout.odin).
 // ---------------------------------------------------------------------------
 
 Dungeon_Stats :: struct {
@@ -31,6 +29,12 @@ Dungeon_Stats :: struct {
 	longest_path:      int, // most room-to-room steps on a shortest route between two rooms
 	dead_ends:         int, // corridor cells with exactly one open side
 	stray_corridors:   int, // corridor cells that reach no room
+	// From an Assign Roles step (zero without one)
+	has_roles:         bool,
+	path_to_boss:      int, // room steps from start to boss with every lock open
+	locks:             int, // locks placed
+	locks_requested:   int,
+	unsolvable:        int, // 1 if the boss can't be reached by collecting keys from the start
 }
 
 // Per-cell flags for the problem overlay
@@ -39,137 +43,23 @@ STAT_DEAD_END    :: u8(1 << 1)
 STAT_PATH_END    :: u8(1 << 2) // room cell at one end of the longest path
 STAT_STRAY       :: u8(1 << 3)
 
-DIR_OFFSETS := [Direction][2]int{
-	.North = {0, -1},
-	.South = {0, 1},
-	.East  = {1, 0},
-	.West  = {-1, 0},
-}
-
-// Can you walk from cell (x, y) to its neighbour in direction dir?
-// doors holds a bit per direction for each room cell with a connected door.
-stats_edge_open :: proc(d: ^Dungeon, doors: []u8, x, y: int, dir: Direction) -> (nx, ny: int, ok: bool) {
-	off := DIR_OFFSETS[dir]
-	nx, ny = x + off.x, y + off.y
-	if !grid_in_bounds(d, nx, ny) do return
-	W := d.config.grid_width
-	a := &d.grid[y * W + x]
-	b := &d.grid[ny * W + nx]
-	if a.cell_type == .Empty || b.cell_type == .Empty do return
-	// Room cells without a module are solid walls (Wall Border)
-	if (a.cell_type == .Room && a.module_id < 0) || (b.cell_type == .Room && b.module_id < 0) do return
-	if merge_room_walls do return nx, ny, true
-
-	a_room := a.cell_type == .Room
-	b_room := b.cell_type == .Room
-	if !a_room && !b_room do return nx, ny, true
-	if a_room && b_room && a.module_id == b.module_id do return nx, ny, true
-
-	ok = doors[y * W + x] & (1 << u8(dir)) != 0 ||
-	     doors[ny * W + nx] & (1 << u8(opposite_direction(dir))) != 0
-	return
-}
-
 // Analyze the dungeon. If flags is given (one per grid cell) it is filled with STAT_* bits.
-//
-// The layout is turned into a graph: one node per room, one per connected corridor
-// network, and a link node between rooms that open straight into each other. Every
-// step from one room to the next is then two edges, wherever it goes through.
+// Connections follow the Merge Room Walls setting (see layout.odin).
 dungeon_analyze :: proc(d: ^Dungeon, flags: []u8 = nil) -> (s: Dungeon_Stats) {
 	context.allocator = context.temp_allocator
 	W := d.config.grid_width
 	n := len(d.grid)
 
-	doors := make([]u8, n)
-	for &m in d.modules {
-		for di in m.connected_doors {
-			slot := m.rot_doors[di]
-			gx, gy := door_global(slot, m.grid_x, m.grid_y)
-			if grid_in_bounds(d, gx, gy) do doors[gy * W + gx] |= 1 << u8(slot.direction)
-		}
-	}
-
-	// Graph node of each cell: rooms are the distinct module ids on the grid (Join Rooms
-	// merges ids), numbered first; corridor networks are numbered after them.
-	node_of := make([]int, n)
-	slice.fill(node_of, -1)
-	id_to_room := make([]int, len(d.modules))
-	slice.fill(id_to_room, -1)
-	R := 0
-	for &cell, i in d.grid {
-		switch cell.cell_type {
-		case .Room:
-			id := cell.module_id
-			if id < 0 || id >= len(d.modules) do continue // wall cell
-			if id_to_room[id] < 0 {
-				id_to_room[id] = R
-				R += 1
-			}
-			node_of[i] = id_to_room[id]
-			s.room_cells += 1
-		case .Corridor, .Door:
-			s.corridor_cells += 1
-		case .Empty:
-		}
-	}
+	g := layout_graph_build(d, !merge_room_walls)
+	R := g.rooms
+	V := len(g.adj)
 	s.rooms = R
+	s.room_cells = g.room_cells
+	s.corridor_cells = g.corridor_cells
 	s.coverage = f32(s.room_cells + s.corridor_cells) / f32(max(n, 1))
 
-	V := R
-	queue := make([dynamic]int, 0, n)
-	for &cell, i in d.grid {
-		if (cell.cell_type != .Corridor && cell.cell_type != .Door) || node_of[i] >= 0 do continue
-		node_of[i] = V
-		clear(&queue)
-		append(&queue, i)
-		for head := 0; head < len(queue); head += 1 {
-			ci := queue[head]
-			for dir in Direction {
-				nx, ny, ok := stats_edge_open(d, doors, ci % W, ci / W, dir)
-				if !ok do continue
-				ni := ny * W + nx
-				if node_of[ni] >= 0 || d.grid[ni].cell_type == .Room do continue
-				node_of[ni] = V
-				append(&queue, ni)
-			}
-		}
-		V += 1
-	}
-
-	// Edges between different nodes, from every open cell edge (each pair once)
-	pairs := make(map[[2]int]bool)
-	for i in 0 ..< n {
-		a := node_of[i]
-		if a < 0 do continue
-		for dir in ([2]Direction{.East, .South}) {
-			nx, ny, ok := stats_edge_open(d, doors, i % W, i / W, dir)
-			if !ok do continue
-			b := node_of[ny * W + nx]
-			if b < 0 || b == a do continue
-			pairs[{min(a, b), max(a, b)}] = true
-		}
-	}
-	adj := make([dynamic][dynamic]int, V)
-	for pair in pairs {
-		a, b := pair[0], pair[1]
-		if a < R && b < R {
-			// room opens straight into room: add a link node so it is two edges too
-			append(&adj, make([dynamic]int))
-			l := len(adj) - 1
-			append(&adj[a], l); append(&adj[l], a)
-			append(&adj[b], l); append(&adj[l], b)
-		} else {
-			append(&adj[a], b)
-			append(&adj[b], a)
-		}
-	}
-	V = len(adj)
-
-	edges := 0
-	for v in 0 ..< V do edges += len(adj[v])
-	edges /= 2
 	for r in 0 ..< R {
-		switch len(adj[r]) {
+		switch len(g.adj[r]) {
 		case 0: s.isolated_rooms += 1
 		case 1: s.dead_end_rooms += 1
 		}
@@ -179,6 +69,7 @@ dungeon_analyze :: proc(d: ^Dungeon, flags: []u8 = nil) -> (s: Dungeon_Stats) {
 	comp := make([]int, V)
 	slice.fill(comp, -1)
 	comp_rooms := make([dynamic]int)
+	queue := make([dynamic]int, 0, V)
 	for root in 0 ..< V {
 		if comp[root] >= 0 do continue
 		c := len(comp_rooms)
@@ -189,7 +80,8 @@ dungeon_analyze :: proc(d: ^Dungeon, flags: []u8 = nil) -> (s: Dungeon_Stats) {
 		for head := 0; head < len(queue); head += 1 {
 			v := queue[head]
 			if v < R do comp_rooms[c] += 1
-			for nb in adj[v] {
+			for ei in g.adj[v] {
+				nb := layout_other(g.edges[ei], v)
 				if comp[nb] >= 0 do continue
 				comp[nb] = c
 				append(&queue, nb)
@@ -202,26 +94,16 @@ dungeon_analyze :: proc(d: ^Dungeon, flags: []u8 = nil) -> (s: Dungeon_Stats) {
 		if rooms > comp_rooms[main_comp] do main_comp = c
 	}
 	s.unreachable_rooms = R - (R > 0 ? comp_rooms[main_comp] : 0)
-	s.loops = edges - V + len(comp_rooms)
+	s.loops = len(g.edges) - V + len(comp_rooms)
 
 	// Longest shortest route between two rooms, in room steps (two edges each)
-	dist := make([]int, V)
 	path_a, path_b := -1, -1
 	for root in 0 ..< R {
-		slice.fill(dist, -1)
-		dist[root] = 0
-		clear(&queue)
-		append(&queue, root)
-		for head := 0; head < len(queue); head += 1 {
-			v := queue[head]
-			if v < R && dist[v] / 2 > s.longest_path {
-				s.longest_path = dist[v] / 2
-				path_a, path_b = root, v
-			}
-			for nb in adj[v] {
-				if dist[nb] >= 0 do continue
-				dist[nb] = dist[v] + 1
-				append(&queue, nb)
+		dist, _ := layout_distances(&g, root)
+		for r in 0 ..< R {
+			if dist[r] / 2 > s.longest_path {
+				s.longest_path = dist[r] / 2
+				path_a, path_b = root, r
 			}
 		}
 	}
@@ -231,24 +113,33 @@ dungeon_analyze :: proc(d: ^Dungeon, flags: []u8 = nil) -> (s: Dungeon_Stats) {
 		if cell.cell_type != .Corridor && cell.cell_type != .Door do continue
 		open := 0
 		for dir in Direction {
-			if _, _, ok := stats_edge_open(d, doors, i % W, i / W, dir); ok do open += 1
+			if _, _, ok := layout_edge_open(d, g.doors, g.strict, i % W, i / W, dir); ok do open += 1
 		}
 		if open == 1 {
 			s.dead_ends += 1
 			if flags != nil do flags[i] |= STAT_DEAD_END
 		}
-		if len(adj[node_of[i]]) == 0 {
+		if len(g.adj[g.node_of[i]]) == 0 {
 			s.stray_corridors += 1
 			if flags != nil do flags[i] |= STAT_STRAY
 		}
 	}
 
 	if flags != nil {
-		for v, i in node_of {
+		for v, i in g.node_of {
 			if v < 0 || v >= R do continue
 			if comp[v] != main_comp do flags[i] |= STAT_UNREACHABLE
 			if v == path_a || v == path_b do flags[i] |= STAT_PATH_END
 		}
+	}
+
+	if d.roles.assigned {
+		s.has_roles = true
+		solvable: bool
+		solvable, s.path_to_boss = roles_simulate(d, &g)
+		s.unsolvable = solvable ? 0 : 1
+		s.locks = len(d.roles.locks)
+		s.locks_requested = d.roles.locks_requested
 	}
 	return
 }
@@ -398,6 +289,9 @@ STAT_ROWS := [?]struct {
 	{"Longest path",   "Most room-to-room steps needed between two rooms", false},
 	{"Dead ends",      "Corridor cells with only one open side", true},
 	{"Stray corridor", "Corridor cells that lead to no room", true},
+	{"Path to boss",   "Room steps from start to boss (Assign Roles)", false},
+	{"Locks",          "Locked doors placed (Assign Roles)", false},
+	{"Unsolvable",     "1 if collecting keys from the start\ncan't open the way to the boss", true},
 }
 
 // Coverage has one decimal; the other rows are whole numbers.
@@ -410,6 +304,7 @@ stats_values :: proc(s: Dungeon_Stats) -> [len(STAT_ROWS)]f32 {
 		f32(s.rooms), s.coverage * 100, f32(s.groups), f32(s.unreachable_rooms),
 		f32(s.isolated_rooms), f32(s.dead_end_rooms), f32(s.loops),
 		f32(s.longest_path), f32(s.dead_ends), f32(s.stray_corridors),
+		f32(s.path_to_boss), f32(s.locks), f32(s.unsolvable),
 	}
 }
 
@@ -487,7 +382,7 @@ ui_stats_tab :: proc(d: ^Dungeon) {
 		time.duration_milliseconds(batch.gen_time) / f64(n))
 
 	sum, lo, hi: [len(STAT_ROWS)]f32
-	connected := 0
+	connected, solvable, with_roles, problems := 0, 0, 0, 0
 	for &res, ri in batch.results {
 		v := stats_values(res.stats)
 		for i in 0 ..< len(v) {
@@ -496,13 +391,26 @@ ui_stats_tab :: proc(d: ^Dungeon) {
 			hi[i] = ri == 0 ? v[i] : max(hi[i], v[i])
 		}
 		if res.stats.groups <= 1 do connected += 1
+		if res.stats.has_roles {
+			with_roles += 1
+			if res.stats.unsolvable == 0 do solvable += 1
+		}
+		if stats_has_problem(res.stats) do problems += 1
 	}
 
-	connected_text := fmt.ctprintf("Fully connected: %d / %d (%.0f%%)", connected, n, 100 * f32(connected) / f32(n))
-	if connected < n {
-		imgui.TextColored(STATS_TEXT_BAD, "%s", connected_text)
-	} else {
-		imgui.Text("%s", connected_text)
+	ratio_line :: proc(label: string, good, total: int) {
+		text := fmt.ctprintf("%s: %d / %d (%.0f%%)", label, good, total, 100 * f32(good) / f32(total))
+		if good < total {
+			imgui.TextColored(STATS_TEXT_BAD, "%s", text)
+		} else {
+			imgui.Text("%s", text)
+		}
+	}
+	ratio_line("Fully connected", connected, n)
+	if with_roles > 0 {
+		ratio_line("Solvable", solvable, with_roles)
+		requested := batch.results[0].stats.locks_requested
+		imgui.Text("Locks placed: %.1f of %d asked", sum[len(STAT_ROWS) - 2] / f32(n), c.int(requested))
 	}
 
 	if imgui.BeginTable("##stats_batch", 4, imgui.TableFlags_RowBg | imgui.TableFlags_SizingStretchProp) {
@@ -530,14 +438,14 @@ ui_stats_tab :: proc(d: ^Dungeon) {
 		imgui.EndTable()
 	}
 
-	// Seeds that left rooms unreachable; click one to generate it here
-	if connected < n {
-		imgui.Text("Disconnected seeds (click to load):")
+	// Seeds that left rooms unreachable or can't be completed; click one to generate it here
+	if problems > 0 {
+		imgui.Text("Problem seeds (click to load):")
 		shown := 0
 		for &res in batch.results {
-			if res.stats.groups <= 1 do continue
+			if !stats_has_problem(res.stats) do continue
 			if shown >= 30 {
-				imgui.TextDisabled("... and %d more", c.int(n - connected - shown))
+				imgui.TextDisabled("... and %d more", c.int(problems - shown))
 				break
 			}
 			if shown % 5 != 0 do imgui.SameLine()
@@ -549,4 +457,9 @@ ui_stats_tab :: proc(d: ^Dungeon) {
 			shown += 1
 		}
 	}
+}
+
+// Disconnected, or (with roles) not completable.
+stats_has_problem :: proc(s: Dungeon_Stats) -> bool {
+	return s.groups > 1 || s.unsolvable > 0
 }
