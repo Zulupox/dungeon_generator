@@ -208,7 +208,7 @@ dungeon_reset :: proc(d: ^Dungeon) {
 	d.step_done = false
 	d.gen_done = false
 	d.showcase = false
-	state.canvas.inspect_module = -1 // module indices are about to be reused
+	if d == &state.dungeon do state.canvas.inspect_module = -1 // module indices are about to be reused
 	d.active_area_id = -1
 	d.active_area_exclude = false
 	d.active_group = ""

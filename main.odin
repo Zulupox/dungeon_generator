@@ -63,6 +63,7 @@ main :: proc() {
 
 	templates_init()
 	defer templates_destroy()
+	defer batch_destroy()
 
 	state.dungeon = dungeon_create(config)
 	state.dungeon.recipe = recipe_classic_dungeon()
@@ -151,6 +152,9 @@ update :: proc(dt: f32) {
 		}
 	}
 
+	batch_update()
+	stats_update_current(&state.dungeon)
+
 	if state.editor.active {
 		editor_update()
 	} else {
@@ -189,6 +193,7 @@ draw :: proc() {
 	render_dungeon(&state.dungeon)
 	render_grid_outline(&state.dungeon)
 	render_areas(&state.dungeon)
+	stats_render_3d(&state.dungeon)
 	if state.editor.active {
 		editor_render_3d(&state.dungeon)
 	} else {

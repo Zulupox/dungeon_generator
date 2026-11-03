@@ -536,6 +536,12 @@ draw_ui :: proc() {
 			imgui.EndTabItem()
 		}
 
+		// ---- Stats tab ----
+		if imgui.BeginTabItem("Stats") {
+			ui_stats_tab(d)
+			imgui.EndTabItem()
+		}
+
 		// ---- Files tab (save/load recipes) ----
 		if imgui.BeginTabItem("Files") {
 			ui_files_tab(d)
