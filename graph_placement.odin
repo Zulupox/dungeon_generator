@@ -31,11 +31,16 @@ template_index_by_name :: proc(name: string) -> int {
 	return -1
 }
 
-// Template indices a room type may use; all templates if none of its names resolve.
+// Template indices a room type may use: its named templates plus every template of its
+// template_types. All templates if nothing resolves.
 room_type_templates :: proc(t: ^Room_Type_Def) -> []int {
 	list := make([dynamic]int, 0, len(t.templates), context.temp_allocator)
 	for name in t.templates {
 		if ti := template_index_by_name(name); ti >= 0 do append(&list, ti)
+	}
+	for &tmpl, ti in module_templates {
+		if !slice.contains(t.template_types, tmpl.room_type) do continue
+		if !slice.contains(list[:], ti) do append(&list, ti)
 	}
 	if len(list) == 0 {
 		for i in 0 ..< len(module_templates) do append(&list, i)

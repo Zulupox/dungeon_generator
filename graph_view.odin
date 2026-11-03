@@ -249,9 +249,11 @@ draw_graph_window :: proc(d: ^Dungeon) {
 		imgui.Text("Zone:  %s", fmt.ctprintf("%s", p.zones[t.zone]))
 		imgui.Text("Depth: %d%s", c.int(node.depth), node.depth > t.max_depth && t.max_depth > 0 ? cstring("  (over max)") : cstring(""))
 		imgui.Text("Doors: %d", c.int(room_graph_degree(g, hovered)))
-		if len(t.templates) > 0 {
+		if len(t.templates) > 0 || len(t.template_types) > 0 {
 			imgui.Text("Templates:")
-			for name in t.templates do imgui.Text("  %s", fmt.ctprintf("%s", name))
+			for ti in room_type_templates(t) {
+				imgui.Text("  %s", fmt.ctprintf("%s", module_templates[ti].name))
+			}
 		}
 		imgui.EndTooltip()
 	}

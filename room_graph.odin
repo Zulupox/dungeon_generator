@@ -4,6 +4,7 @@ import "core:encoding/json"
 import "core:fmt"
 import "core:math/rand"
 import "core:os"
+import "core:reflect"
 import "core:slice"
 import "core:strings"
 
@@ -28,6 +29,7 @@ Room_Type_Def :: struct {
 	pref_doors: int,      // soft cap, scored as door_overflow, 0 = none
 	max_depth:  int,      // max hops from the entry, scored as depth_overflow, 0 = none
 	templates:  []string, // module template names this room may use
+	template_types: []Room_Type, // plus every template whose room_type is listed here
 	color:      Color4,
 }
 
@@ -389,6 +391,7 @@ Json_Room_Type :: struct {
 	pref_doors: int       `json:"pref_doors"`,
 	max_depth:  int       `json:"max_depth"`,
 	templates:  []string  `json:"templates"`,
+	template_types: []string `json:"template_types"`, // Room_Type names, e.g. "Guard_Room"
 	color:      [4]u8     `json:"color"`,
 }
 
@@ -463,6 +466,11 @@ room_profile_load :: proc(filepath: string) -> (p: Room_Profile, ok: bool) {
 			color      = jt.color.a > 0 ? jt.color : {160, 160, 160, 255},
 		}
 		for name, i in jt.templates do t.templates[i] = strings.clone(name)
+		template_types := make([dynamic]Room_Type)
+		for name in jt.template_types {
+			if rt, rt_ok := reflect.enum_from_name(Room_Type, name); rt_ok do append(&template_types, rt)
+		}
+		t.template_types = template_types[:]
 		append(&types, t)
 		append(&type_names, jt.name)
 	}
@@ -526,6 +534,7 @@ room_profile_free :: proc(p: ^Room_Profile) {
 		delete(t.name)
 		for name in t.templates do delete(name)
 		delete(t.templates)
+		delete(t.template_types)
 	}
 	delete(p.types)
 	delete(p.pair_weight)
