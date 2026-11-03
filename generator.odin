@@ -626,6 +626,7 @@ execute_connect_doors :: proc(d: ^Dungeon, params: ^Connect_Doors_Params) {
 	}
 
 	if len(connections) == 0 {
+		if params.add_doorways do add_doorways(d, params.mode)
 		d.step_done = true
 		return
 	}
@@ -743,6 +744,7 @@ execute_connect_doors :: proc(d: ^Dungeon, params: ^Connect_Doors_Params) {
 		}
 	}
 
+	if params.add_doorways do add_doorways(d, params.mode)
 	d.step_done = true
 }
 
@@ -2715,6 +2717,11 @@ execute_join_rooms :: proc(d: ^Dungeon) {
 				if neighbor.module_id < 0 do continue
 				if neighbor.module_id == cell.module_id do continue
 
+				// With a source group, only rooms in that group are joined
+				if len(d.active_source_group) > 0 {
+					if !is_in_group(d, d.active_source_group, cell.module_id) || !is_in_group(d, d.active_source_group, neighbor.module_id) do continue
+				}
+
 				uf_union(parent, cell.module_id, neighbor.module_id)
 			}
 		}
@@ -2886,54 +2893,52 @@ connect_module_sets :: proc(d: ^Dungeon, from, to: []int, manhattan_weight: f32)
 	return -1, -1, false
 }
 
-// Group index per module: modules whose cells touch, directly or through corridors, share a
-// group. Wall Border cells (room cells without a module) block. Temp-allocated.
-module_groups :: proc(d: ^Dungeon) -> (group: []int, count: int) {
-	W := d.config.grid_width
-	n := len(d.grid)
-	label := make([]int, n, context.temp_allocator)
-	slice.fill(label, -1)
-	is_open :: proc(c: Grid_Cell) -> bool {
-		return c.cell_type != .Empty && !(c.cell_type == .Room && c.module_id < 0)
-	}
-
-	queue := make([dynamic]int, 0, n, context.temp_allocator)
-	for i in 0 ..< n {
-		if label[i] >= 0 || !is_open(d.grid[i]) do continue
-		label[i] = count
+// Group of every layout node: nodes that can reach each other through doors and
+// corridors share a group. Temp-allocated.
+layout_components :: proc(g: ^Layout_Graph) -> (comp: []int, count: int) {
+	comp = make([]int, len(g.adj), context.temp_allocator)
+	slice.fill(comp, -1)
+	queue := make([dynamic]int, 0, len(g.adj), context.temp_allocator)
+	for root in 0 ..< len(g.adj) {
+		if comp[root] >= 0 do continue
+		comp[root] = count
 		clear(&queue)
-		append(&queue, i)
+		append(&queue, root)
 		for head := 0; head < len(queue); head += 1 {
-			ci := queue[head]
-			x, y := ci % W, ci / W
-			for off in ([4][2]int{{1, 0}, {-1, 0}, {0, 1}, {0, -1}}) {
-				nx, ny := x + off.x, y + off.y
-				if !grid_in_bounds(d, nx, ny) do continue
-				ni := ny * W + nx
-				if label[ni] >= 0 || !is_open(d.grid[ni]) do continue
-				label[ni] = count
-				append(&queue, ni)
+			v := queue[head]
+			for ei in g.adj[v] {
+				nb := layout_other(g.edges[ei], v)
+				if comp[nb] >= 0 do continue
+				comp[nb] = count
+				append(&queue, nb)
 			}
 		}
 		count += 1
 	}
+	return
+}
 
+// Group index per module: modules that can reach each other through doors and corridors
+// (or are joined into one room) share a group. Temp-allocated.
+module_groups :: proc(d: ^Dungeon) -> (group: []int, count: int) {
+	g := layout_graph_build(d, true)
+	comp: []int
+	comp, count = layout_components(&g)
 	group = make([]int, len(d.modules), context.temp_allocator)
-	for &m, mi in d.modules {
-		group[mi] = -1
-		for filled, ci in m.rot_mask {
-			if !filled do continue
-			x, y := m.grid_x + ci % m.rot_width, m.grid_y + ci / m.rot_width
-			if grid_in_bounds(d, x, y) do group[mi] = label[y * W + x]
-			break
-		}
+	for mi in 0 ..< len(d.modules) {
+		room := g.module_room[grid_module_id(d, mi)]
+		group[mi] = room >= 0 ? comp[room] : -1
 	}
 	return
 }
 
-// Link every group of rooms to the largest one with corridors, nearest door pairs first.
-// Groups that can't be reached are left alone. Returns the number of corridors carved.
+// Link every group of rooms to the largest one: a doorway where the two groups' rooms
+// touch, otherwise a corridor (nearest exits first). Groups that can't be reached are left
+// alone. Returns the number of doorways and corridors added.
 connect_groups :: proc(d: ^Dungeon, manhattan_weight: f32) -> (carved: int) {
+	// Doors facing corridors are otherwise only marked when generation finishes
+	mark_connected_doors(d)
+	W := d.config.grid_width
 	for {
 		group, count := module_groups(d)
 		if count <= 1 do return
@@ -2943,9 +2948,37 @@ connect_groups :: proc(d: ^Dungeon, manhattan_weight: f32) -> (carved: int) {
 		main := 0
 		for s, g in size do if s > size[main] do main = g
 
+		// Touching another group: knock a doorway through the shared wall
+		cell_group :: proc(d: ^Dungeon, group: []int, i: int) -> int {
+			c := d.grid[i]
+			if c.cell_type != .Room || c.module_id < 0 do return -1
+			return group[c.module_id]
+		}
+		touching := make([dynamic]Layout_Opening, context.temp_allocator)
+		touch_group := -1
+		for i in 0 ..< len(d.grid) {
+			a := cell_group(d, group, i)
+			if a < 0 do continue
+			for dir in ([2]Direction{.East, .South}) {
+				off := DIR_OFFSETS[dir]
+				nx, ny := i % W + off.x, i / W + off.y
+				if !grid_in_bounds(d, nx, ny) do continue
+				b := cell_group(d, group, ny * W + nx)
+				if b < 0 || a == b || (a != main && b != main) do continue
+				other := a == main ? b : a
+				if touch_group < 0 do touch_group = other
+				if other == touch_group do append(&touching, Layout_Opening{cell = i, dir = dir})
+			}
+		}
+		if len(touching) > 0 {
+			knock_doorway(d, touching[len(touching) / 2])
+			carved += 1
+			continue
+		}
+
+		// Otherwise a corridor
 		main_mods := make([dynamic]int, context.temp_allocator)
 		for g, mi in group do if g == main do append(&main_mods, mi)
-
 		linked := false
 		for g in 0 ..< count {
 			if g == main || size[g] == 0 do continue
@@ -2961,8 +2994,100 @@ connect_groups :: proc(d: ^Dungeon, manhattan_weight: f32) -> (carved: int) {
 	}
 }
 
-// Connect_Groups step: corridors between groups of rooms that can't reach each other.
+// Connect_Groups step: doorways or corridors between groups of rooms that can't reach each other.
 execute_connect_groups :: proc(d: ^Dungeon, params: ^Connect_Groups_Params) {
 	connect_groups(d, params.manhattan_weight)
 	d.step_done = true
+}
+
+// ---------------------------------------------------------------------------
+// Doorways between touching rooms
+// ---------------------------------------------------------------------------
+
+// Give touching rooms that have no door between them a doorway through their shared wall
+// (a door slot added on each side, both connected). Respects the step's area and source
+// group. Minimal mode only opens doorways for rooms that have no connection yet.
+add_doorways :: proc(d: ^Dungeon, mode: Connect_Doors_Mode) {
+	W := d.config.grid_width
+	n := len(d.grid)
+
+	// Door bits per cell, as the layout graph sees them
+	doors := make([]u8, n, context.temp_allocator)
+	refresh_doors :: proc(d: ^Dungeon, doors: []u8) {
+		slice.zero(doors)
+		W := d.config.grid_width
+		for &m in d.modules {
+			for di in m.connected_doors {
+				slot := m.rot_doors[di]
+				gx, gy := door_global(slot, m.grid_x, m.grid_y)
+				if grid_in_bounds(d, gx, gy) do doors[gy * W + gx] |= 1 << u8(slot.direction)
+			}
+		}
+	}
+	refresh_doors(d, doors)
+
+	// Shared wall edges per touching room pair (grid module ids), in grid order
+	Shared :: struct {
+		a, b:  int,
+		edges: [dynamic]Layout_Opening,
+		open:  bool, // already has a door on one of these edges
+	}
+	pairs := make([dynamic]Shared, context.temp_allocator)
+	pair_index := make(map[[2]int]int, context.temp_allocator)
+	for i in 0 ..< n {
+		a := d.grid[i]
+		if a.cell_type != .Room || a.module_id < 0 do continue
+		x, y := i % W, i / W
+		for dir in ([2]Direction{.East, .South}) {
+			off := DIR_OFFSETS[dir]
+			nx, ny := x + off.x, y + off.y
+			if !grid_in_bounds(d, nx, ny) do continue
+			b := d.grid[ny * W + nx]
+			if b.cell_type != .Room || b.module_id < 0 || b.module_id == a.module_id do continue
+			if !cell_in_active_area(d, x, y) || !cell_in_active_area(d, nx, ny) do continue
+			if len(d.active_source_group) > 0 {
+				if !is_in_group(d, d.active_source_group, a.module_id) || !is_in_group(d, d.active_source_group, b.module_id) do continue
+			}
+			key := [2]int{min(a.module_id, b.module_id), max(a.module_id, b.module_id)}
+			pi, found := pair_index[key]
+			if !found {
+				pi = len(pairs)
+				pair_index[key] = pi
+				append(&pairs, Shared{a = key[0], b = key[1], edges = make([dynamic]Layout_Opening, context.temp_allocator)})
+			}
+			append(&pairs[pi].edges, Layout_Opening{cell = i, dir = dir})
+			if doors[i] & (1 << u8(dir)) != 0 || doors[ny * W + nx] & (1 << u8(opposite_direction(dir))) != 0 {
+				pairs[pi].open = true
+			}
+		}
+	}
+
+	// Shuffle for variety (matters in Minimal mode, where order decides who gets a door)
+	for i := len(pairs) - 1; i > 0; i -= 1 {
+		j := rand.int_max(i + 1)
+		pairs[i], pairs[j] = pairs[j], pairs[i]
+	}
+
+	for &p in pairs {
+		if p.open do continue
+		if mode == .Minimal && len(d.modules[p.a].connected_doors) > 0 && len(d.modules[p.b].connected_doors) > 0 do continue
+
+		// Doorway in the middle of the shared wall
+		knock_doorway(d, p.edges[len(p.edges) / 2])
+	}
+}
+
+// Open a doorway on a wall edge between two rooms: a connected door slot on each side.
+knock_doorway :: proc(d: ^Dungeon, op: Layout_Opening) {
+	W := d.config.grid_width
+	x, y := op.cell % W, op.cell / W
+	off := DIR_OFFSETS[op.dir]
+	ids := [2]int{d.grid[op.cell].module_id, d.grid[(y + off.y) * W + x + off.x].module_id}
+	cells := [2][2]int{{x, y}, {x + off.x, y + off.y}}
+	dirs := [2]Direction{op.dir, opposite_direction(op.dir)}
+	for side in 0 ..< 2 {
+		m := &d.modules[ids[side]]
+		append(&m.rot_doors, Door_Slot{local_x = cells[side].x - m.grid_x, local_y = cells[side].y - m.grid_y, direction = dirs[side]})
+		connect_door(m, len(m.rot_doors) - 1, true)
+	}
 }

@@ -160,6 +160,8 @@ ui_step_params :: proc(step: ^Gen_Step) {
 			step.connect_doors.mode = Connect_Doors_Mode(mode_val)
 		}
 		ui_drag_int("Max/Pair", &step.connect_doors.max_per_pair, 0, 10)
+		imgui.Checkbox("Add doorways", &step.connect_doors.add_doorways)
+		if imgui.IsItemHovered() do imgui.SetTooltip("Touching rooms whose door slots don't face each other\nget a doorway through the middle of their shared wall")
 	case .Place_Specific:
 		tmpl_idx := clamp(step.place_specific.template_index, 0, len(module_templates) - 1)
 		tmpl_val := c.int(tmpl_idx)
@@ -463,7 +465,7 @@ draw_ui :: proc() {
 					new_step.pack_rooms = {max_rooms = 0}
 				case .Join_Rooms:
 				case .Connect_Doors:
-					new_step.connect_doors = {mode = .Minimal, max_per_pair = 1}
+					new_step.connect_doors = {mode = .Minimal, max_per_pair = 1, add_doorways = true}
 				case .Place_Specific:
 					new_step.place_specific = {template_index = 1, x = 30, y = 30, rotation = 0}
 				case .Mirror_Rooms:

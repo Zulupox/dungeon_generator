@@ -144,7 +144,9 @@ assign_roles :: proc(d: ^Dungeon, params: ^Assign_Roles_Params) {
 	r.assigned = true
 	r.locks_requested = clamp(params.locks, 0, MAX_LOCKS)
 
-	g := layout_graph_build(d, false)
+	// Doors facing corridors are otherwise only marked when generation finishes
+	mark_connected_doors(d)
+	g := layout_graph_build(d, true)
 	R := g.rooms
 	if R == 0 do return
 

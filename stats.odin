@@ -12,8 +12,7 @@ import imgui "libs/odin-imgui"
 // ---------------------------------------------------------------------------
 // Dungeon analysis: connectivity and layout stats
 //
-// Connections follow the Merge Room Walls display setting, so the stats match what you
-// see (the layout graph and its connection rule are in layout.odin).
+// Rooms connect only through doors (or by being joined into one room); see layout.odin.
 // ---------------------------------------------------------------------------
 
 Dungeon_Stats :: struct {
@@ -44,13 +43,13 @@ STAT_PATH_END    :: u8(1 << 2) // room cell at one end of the longest path
 STAT_STRAY       :: u8(1 << 3)
 
 // Analyze the dungeon. If flags is given (one per grid cell) it is filled with STAT_* bits.
-// Connections follow the Merge Room Walls setting (see layout.odin).
+// Rooms connect only through doors, or by being joined (see layout.odin).
 dungeon_analyze :: proc(d: ^Dungeon, flags: []u8 = nil) -> (s: Dungeon_Stats) {
 	context.allocator = context.temp_allocator
 	W := d.config.grid_width
 	n := len(d.grid)
 
-	g := layout_graph_build(d, !merge_room_walls)
+	g := layout_graph_build(d, true)
 	R := g.rooms
 	V := len(g.adj)
 	s.rooms = R
@@ -156,7 +155,6 @@ Stats_Key :: struct {
 	progress: int,
 	gen_done: bool,
 	showcase: bool,
-	merge:    bool,
 }
 
 current_stats: Dungeon_Stats
@@ -173,7 +171,6 @@ stats_update_current :: proc(d: ^Dungeon) {
 		progress = d.step_progress,
 		gen_done = d.gen_done,
 		showcase = d.showcase,
-		merge    = merge_room_walls,
 	}
 	if key == current_stats_key && len(current_stats_flags) == len(d.grid) do return
 	current_stats_key = key
@@ -339,11 +336,7 @@ ui_stats_tab :: proc(d: ^Dungeon) {
 		}
 		imgui.EndTable()
 	}
-	if merge_room_walls {
-		imgui.TextDisabled("Touching rooms count as connected\n(Merge Room Walls is on)")
-	} else {
-		imgui.TextDisabled("Rooms connect only through doors\n(Merge Room Walls is off)")
-	}
+	imgui.TextDisabled("Rooms connect through doors;\njoined rooms count as one")
 
 	imgui.Checkbox("Show on map", &stats_show_overlay)
 	if stats_show_overlay {
