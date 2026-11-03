@@ -57,7 +57,7 @@ ADD_STEP_OPTIONS := [?]cstring{
 	"Join Rooms", "Connect Doors", "Place Specific", "Mirror Rooms",
 	"Place Symmetric", "Place Perimeter", "Place Along Line",
 	"Fill Area", "Wall Border", "Connect Linear", "Room Graph", "Place Graph",
-	"Define Palette",
+	"Define Palette", "Connect Groups",
 }
 ADD_STEP_TYPES := [?]Step_Type{
 	.Seed_Rooms, .Grow_Clusters, .Connect_MST, .Mark_Doors,
@@ -66,7 +66,7 @@ ADD_STEP_TYPES := [?]Step_Type{
 	.Join_Rooms, .Connect_Doors, .Place_Specific, .Mirror_Rooms,
 	.Place_Symmetric, .Place_Perimeter, .Place_Along_Line,
 	.Fill_Area, .Wall_Border, .Connect_Linear, .Room_Graph, .Place_Graph,
-	.Define_Palette,
+	.Define_Palette, .Connect_Groups,
 }
 
 // Grid size options
@@ -101,6 +101,7 @@ STEP_TYPE_COLORS := [Step_Type]rl.Color{
 	.Room_Graph       = {255, 230, 120, 255},
 	.Place_Graph      = {255, 200, 90, 255},
 	.Define_Palette   = {220, 200, 140, 255},
+	.Connect_Groups   = {140, 220, 255, 255},
 }
 
 // ---------------------------------------------------------------------------
@@ -203,6 +204,8 @@ ui_step_params :: proc(step: ^Gen_Step) {
 		ui_drag_int("Blue", &step.fill_area.color_b, 0, 255)
 	case .Wall_Border:
 		ui_drag_int("Thickness", &step.wall_border.thickness, 1, 5)
+	case .Connect_Groups:
+		imgui.SliderFloat("Manhattan", &step.connect_groups.manhattan_weight, 0.0, 1.0)
 	case .Connect_Linear:
 		imgui.SliderFloat("Manhattan", &step.connect_linear.manhattan_weight, 0.0, 1.0)
 	case .Room_Graph:
@@ -470,6 +473,8 @@ draw_ui :: proc() {
 					new_step.fill_area = {color_r = 120, color_g = 100, color_b = 70}
 				case .Wall_Border:
 					new_step.wall_border = {thickness = 2}
+				case .Connect_Groups:
+					new_step.connect_groups = {manhattan_weight = 0.8}
 				case .Connect_Linear:
 					new_step.connect_linear = {manhattan_weight = 0.8}
 				case .Room_Graph:

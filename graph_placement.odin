@@ -187,20 +187,38 @@ find_free_spot :: proc(d: ^Dungeon, p: ^Room_Profile, node_type: int, cx, cy: f3
 	return {}, false
 }
 
-// Corridor between two placed modules using their closest free doors. True if a path was carved.
+// Corridor between two placed modules, trying their free door pairs nearest first.
+// True if a path was carved.
 graph_corridor :: proc(d: ^Dungeon, ma, mb: int, manhattan_weight: f32) -> bool {
-	job := find_best_door_pair(d, ma, mb)
-	sx, sy := job.from_door_gx, job.from_door_gy
-	tx, ty := job.to_door_gx, job.to_door_gy
-	if !grid_is_passable(d, sx, sy) || !grid_is_passable(d, tx, ty) do return false
+	_, _, ok := connect_module_sets(d, {ma}, {mb}, manhattan_weight)
+	return ok
+}
 
-	path := astar_find_path(d, sx, sy, tx, ty, manhattan_weight)
-	defer delete(path)
-	adjacent := abs(sx - tx) + abs(sy - ty) <= 1
-	if len(path) == 0 && !adjacent do return false
-
-	connect_rooms_astar(d, job, manhattan_weight)
-	return true
+// Last resort when every attempt failed: link each cut-off part to the part the entry
+// reaches with a corridor between any two of their rooms, and record that link as an
+// unplanned graph edge so the graph shows what was built.
+bridge_cut_rooms :: proc(d: ^Dungeon, g: ^Room_Graph, params: ^Place_Graph_Params) {
+	node_of_module :: proc(g: ^Room_Graph, mi: int) -> int {
+		for n, i in g.nodes do if n.module_id == mi do return i
+		return -1
+	}
+	for {
+		reached := realized_reachable(g)
+		from := make([dynamic]int, context.temp_allocator)
+		to := make([dynamic]int, context.temp_allocator)
+		for n, i in g.nodes {
+			if n.module_id < 0 do continue
+			if reached[i] {
+				append(&from, n.module_id)
+			} else {
+				append(&to, n.module_id)
+			}
+		}
+		if len(from) == 0 || len(to) == 0 do return
+		ma, mb, ok := connect_module_sets(d, from[:], to[:], params.manhattan_weight)
+		if !ok do return
+		append(&g.edges, Graph_Edge{a = node_of_module(g, ma), b = node_of_module(g, mb), realized = true, unplanned = true})
+	}
 }
 
 // Starting point for the entry room: centre of the active area, else the grid centre.
@@ -359,6 +377,7 @@ execute_place_graph :: proc(d: ^Dungeon, params: ^Place_Graph_Params) {
 			ok := place_graph_attempt(d, &d.room_graphs[gi], params)
 			last := gi == len(d.room_graphs) - 1 && attempt == retries - 1
 			if ok || last {
+				if !ok do bridge_cut_rooms(d, &d.room_graphs[gi], params)
 				if gi != 0 do d.room_graphs[0], d.room_graphs[gi] = d.room_graphs[gi], d.room_graphs[0]
 				// Other graphs hold stale placement data from rolled-back attempts
 				for &other in d.room_graphs[1:] {

@@ -209,9 +209,14 @@ draw_graph_window :: proc(d: ^Dungeon) {
 	pos := graph_layout(g, origin, size)
 	u32col :: imgui.ColorConvertFloat4ToU32
 
-	// Edges first so nodes sit on top. Unrealized edges (after placement) are dashed red.
+	// Edges first so nodes sit on top. Unrealized edges (after placement) are dashed red,
+	// unplanned ones (corridors placement had to add) orange.
 	placed := room_graph_is_placed(g)
 	for e in g.edges {
+		if e.unplanned {
+			imgui.DrawList_AddLine(dl, pos[e.a], pos[e.b], u32col({1.0, 0.6, 0.2, 0.9}), 2)
+			continue
+		}
 		t := clamp(e.weight / 100, 0.1, 1)
 		col: imgui.Vec4 = e.tree ? {0.9, 0.9, 0.92, 0.35 + 0.55 * t} : {0.45, 0.7, 1.0, 0.3 + 0.5 * t}
 		thick: f32 = e.tree ? 1 + 2.5 * t : 1 + 1.2 * t

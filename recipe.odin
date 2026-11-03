@@ -35,6 +35,7 @@ Step_Type :: enum {
 	Room_Graph,
 	Place_Graph,
 	Define_Palette,
+	Connect_Groups,
 }
 
 STEP_TYPE_NAMES := [Step_Type]cstring{
@@ -63,6 +64,7 @@ STEP_TYPE_NAMES := [Step_Type]cstring{
 	.Room_Graph       = "Room Graph",
 	.Place_Graph      = "Place Graph",
 	.Define_Palette   = "Define Palette",
+	.Connect_Groups   = "Connect Groups",
 }
 
 Seed_Rooms_Params :: struct {
@@ -213,6 +215,11 @@ Wall_Border_Params :: struct {
 	thickness: int,  // border width in cells (1-3)
 }
 
+// Connect_Groups carves corridors between groups of rooms that cannot reach each other.
+Connect_Groups_Params :: struct {
+	manhattan_weight: f32,  // A* corridor style (0.0 = organic, 1.0 = straight)
+}
+
 Connect_Linear_Params :: struct {
 	manhattan_weight: f32,  // A* corridor style (0.0 = organic, 1.0 = straight)
 }
@@ -270,6 +277,7 @@ Gen_Step :: struct {
 	room_graph:       Room_Graph_Params       `json:"room_graph"`,
 	place_graph:      Place_Graph_Params      `json:"place_graph"`,
 	define_palette:   Define_Palette_Params   `json:"define_palette"`,
+	connect_groups:   Connect_Groups_Params   `json:"connect_groups"`,
 	// Area constraint: -1 = no constraint (whole grid), >= 0 = constrain to area
 	area_id:         int                   `json:"area_id"`,
 	area_exclude:    bool                  `json:"area_exclude"`,
@@ -514,6 +522,8 @@ recipe_walled_fortress :: proc() -> Recipe {
 	s = make_step(.Pack_Rooms);        s.pack_rooms = {max_rooms = 15}; s.area_id = 1; s.group = "interior";                      append(&r.steps, s)
 	// Connect everything
 	s = make_step(.Connect_Doors);     s.connect_doors = {mode = .All, max_per_pair = 1};                                          append(&r.steps, s)
+	// Corridors between the wall ring and the rooms inside, which no doors join
+	s = make_step(.Connect_Groups);    s.connect_groups = {manhattan_weight = 0.8};                                            append(&r.steps, s)
 	return r
 }
 
@@ -528,12 +538,14 @@ recipe_castle_courtyard :: proc() -> Recipe {
 	s = make_step(.Define_Area);       s.define_area = {area_id = 1, shape = .Rectangle, x = 18, y = 18, w = 28, h = 28};  append(&r.steps, s)
 	// Place rooms around the perimeter
 	s = make_step(.Place_Perimeter);   s.place_perimeter = {gap_chance = 0.03, max_rooms = 0}; s.area_id = 0; s.group = "walls";  append(&r.steps, s)
+	// Place keep in the center (before the floor fill, which would leave no room for it)
+	s = make_step(.Place_Specific);    s.place_specific = {template_index = 6, x = 29, y = 28, rotation = 0}; s.group = "keep";  append(&r.steps, s)
 	// Fill the courtyard with floor
 	s = make_step(.Fill_Area);         s.fill_area = {color_r = 120, color_g = 100, color_b = 70}; s.area_id = 1;           append(&r.steps, s)
-	// Place keep in the center
-	s = make_step(.Place_Specific);    s.place_specific = {template_index = 6, x = 29, y = 28, rotation = 0}; s.group = "keep";  append(&r.steps, s)
 	// Connect doors
 	s = make_step(.Connect_Doors);     s.connect_doors = {mode = .All, max_per_pair = 1};                                    append(&r.steps, s)
+	// Corridors between the wall ring and the rooms inside, which no doors join
+	s = make_step(.Connect_Groups);    s.connect_groups = {manhattan_weight = 0.8};                                            append(&r.steps, s)
 	return r
 }
 
@@ -624,6 +636,8 @@ recipe_garrison_compound :: proc() -> Recipe {
 	s = make_step(.Place_Along_Line);   s.place_along_line = {x1 = 52, y1 = 18, x2 = 52, y2 = 46, door_side = 0, spacing = 0}; s.group = "barracks_right";  append(&r.steps, s)
 	// Connect all doors
 	s = make_step(.Connect_Doors);      s.connect_doors = {mode = .All, max_per_pair = 1};                                       append(&r.steps, s)
+	// Corridors between the wall ring and the rooms inside, which no doors join
+	s = make_step(.Connect_Groups);    s.connect_groups = {manhattan_weight = 0.8};                                            append(&r.steps, s)
 	return r
 }
 
@@ -673,6 +687,8 @@ recipe_royal_castle :: proc() -> Recipe {
 
 	// Connect all adjacent doors
 	s = make_step(.Connect_Doors);     s.connect_doors = {mode = .All, max_per_pair = 1};                                    append(&r.steps, s)
+	// Corridors between the wall ring and the rooms inside, which no doors join
+	s = make_step(.Connect_Groups);    s.connect_groups = {manhattan_weight = 0.8};                                            append(&r.steps, s)
 
 	return r
 }
@@ -735,6 +751,7 @@ Json_Step :: struct {
 	room_graph:       Room_Graph_Params       `json:"room_graph"`,
 	place_graph:      Place_Graph_Params      `json:"place_graph"`,
 	define_palette:   Define_Palette_Params   `json:"define_palette"`,
+	connect_groups:   Connect_Groups_Params   `json:"connect_groups"`,
 	area_id:         int                   `json:"area_id"`,
 	area_exclude:    bool                  `json:"area_exclude"`,
 	muted:           bool                  `json:"muted"`,
@@ -775,6 +792,7 @@ step_type_to_string :: proc(t: Step_Type) -> string {
 	case .Room_Graph:       return "Room_Graph"
 	case .Place_Graph:      return "Place_Graph"
 	case .Define_Palette:   return "Define_Palette"
+	case .Connect_Groups:   return "Connect_Groups"
 	}
 	return "Unknown"
 }
@@ -806,6 +824,7 @@ string_to_step_type :: proc(s: string) -> (Step_Type, bool) {
 	case "Room_Graph":       return .Room_Graph, true
 	case "Place_Graph":      return .Place_Graph, true
 	case "Define_Palette":   return .Define_Palette, true
+	case "Connect_Groups":   return .Connect_Groups, true
 	}
 	return .Seed_Rooms, false
 }
@@ -842,6 +861,7 @@ recipe_save :: proc(recipe: ^Recipe, filepath: string) -> bool {
 			room_graph       = s.room_graph,
 			place_graph      = s.place_graph,
 			define_palette   = s.define_palette,
+			connect_groups   = s.connect_groups,
 			area_id         = s.area_id,
 			area_exclude    = s.area_exclude,
 			muted           = s.muted,
@@ -910,6 +930,7 @@ recipe_load :: proc(filepath: string) -> (Recipe, bool) {
 			room_graph       = js.room_graph,
 			place_graph      = js.place_graph,
 			define_palette   = js.define_palette,
+			connect_groups   = js.connect_groups,
 			area_id         = js.area_id,
 			area_exclude    = js.area_exclude,
 			muted           = js.muted,

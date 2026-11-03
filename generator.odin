@@ -2,6 +2,7 @@ package dungeon_generator
 
 import "core:math"
 import "core:math/rand"
+import "core:slice"
 
 // ---------------------------------------------------------------------------
 // Room Palette - adjacency rules, budgets, and typed template selection
@@ -278,6 +279,7 @@ execute_connect_mst :: proc(d: ^Dungeon, params: ^Connect_MST_Params) {
 		build_mst(d)
 		d.step_progress = 1
 		if len(d.mst_edges) == 0 {
+			connect_groups(d, params.manhattan_weight)
 			d.step_done = true
 		}
 		return
@@ -291,6 +293,8 @@ execute_connect_mst :: proc(d: ^Dungeon, params: ^Connect_MST_Params) {
 	}
 
 	if d.step_progress - 1 >= len(d.mst_edges) {
+		// MST edges can fail (no free door, no path); bridge whatever is still cut off
+		connect_groups(d, params.manhattan_weight)
 		d.step_done = true
 	}
 }
@@ -471,17 +475,20 @@ build_mst :: proc(d: ^Dungeon) {
 		in_mst[best_to] = true
 		mst_count += 1
 
-		job := find_best_door_pair(d, best_from, best_to)
-		append(&d.mst_edges, job)
+		// No free door pair: skip the edge; connect_groups bridges what is left over
+		if job, ok := find_best_door_pair(d, best_from, best_to); ok {
+			append(&d.mst_edges, job)
+		}
 	}
 }
 
-find_best_door_pair :: proc(d: ^Dungeon, from_idx, to_idx: int) -> Corridor_Job {
+// Closest pair of free doors (door neighbour cell not a room). ok = false if either
+// module has no free door.
+find_best_door_pair :: proc(d: ^Dungeon, from_idx, to_idx: int) -> (job: Corridor_Job, ok: bool) {
 	from_mod := &d.modules[from_idx]
 	to_mod := &d.modules[to_idx]
 
 	best_dist: f32 = 1e18
-	job: Corridor_Job
 	job.from_module = from_idx
 	job.to_module = to_idx
 
@@ -511,11 +518,12 @@ find_best_door_pair :: proc(d: ^Dungeon, from_idx, to_idx: int) -> Corridor_Job 
 				job.from_door_gy = fny
 				job.to_door_gx = tnx
 				job.to_door_gy = tny
+				ok = true
 			}
 		}
 	}
 
-	return job
+	return
 }
 
 // ---------------------------------------------------------------------------
@@ -1667,7 +1675,9 @@ execute_connect_linear :: proc(d: ^Dungeon, params: ^Connect_Linear_Params) {
 // Corridor connection
 // ---------------------------------------------------------------------------
 
-connect_rooms_astar :: proc(d: ^Dungeon, job: Corridor_Job, manhattan_weight: f32) {
+// Carve an A* corridor between the job's two door-neighbour cells. Carves nothing and
+// returns false if there is no path (unless the two cells are already adjacent).
+connect_rooms_astar :: proc(d: ^Dungeon, job: Corridor_Job, manhattan_weight: f32) -> bool {
 	path := astar_find_path(
 		d,
 		job.from_door_gx, job.from_door_gy,
@@ -1675,6 +1685,9 @@ connect_rooms_astar :: proc(d: ^Dungeon, job: Corridor_Job, manhattan_weight: f3
 		manhattan_weight,
 	)
 	defer delete(path)
+
+	adjacent := abs(job.from_door_gx - job.to_door_gx) + abs(job.from_door_gy - job.to_door_gy) <= 1
+	if len(path) == 0 && !adjacent do return false
 
 	corridor_color := Color4{80, 80, 90, 255}
 
@@ -1685,6 +1698,7 @@ connect_rooms_astar :: proc(d: ^Dungeon, job: Corridor_Job, manhattan_weight: f3
 	}
 
 	mark_corridor_cell(d, job.to_door_gx, job.to_door_gy, corridor_color)
+	return true
 }
 
 // ---------------------------------------------------------------------------
@@ -1797,11 +1811,8 @@ build_loop_edges :: proc(d: ^Dungeon, params: ^Add_Loops_Params) {
 		if added >= params.max_extra do break
 		if rand.float32() >= params.loop_chance do continue
 
-		job := find_best_door_pair(d, pair[0], pair[1])
-		// Verify the door pair is valid (both doors found)
-		if job.from_door_gx == 0 && job.from_door_gy == 0 && job.to_door_gx == 0 && job.to_door_gy == 0 {
-			continue // no valid door pair found
-		}
+		job, ok := find_best_door_pair(d, pair[0], pair[1])
+		if !ok do continue
 		append(&d.loop_edges, job)
 		added += 1
 	}
@@ -2186,6 +2197,7 @@ execute_room_corridor :: proc(d: ^Dungeon, params: ^Room_Corridor_Params) {
 		build_mst(d)
 		d.step_progress = 1
 		if len(d.mst_edges) == 0 {
+			connect_groups(d, params.manhattan_weight)
 			d.step_done = true
 		}
 		return
@@ -2199,6 +2211,8 @@ execute_room_corridor :: proc(d: ^Dungeon, params: ^Room_Corridor_Params) {
 	}
 
 	if d.step_progress - 1 >= len(d.mst_edges) {
+		// Chains and their fallback corridors can fail; bridge whatever is still cut off
+		connect_groups(d, params.manhattan_weight)
 		d.step_done = true
 	}
 }
@@ -2782,5 +2796,140 @@ execute_join_rooms :: proc(d: ^Dungeon) {
 		}
 	}
 
+	d.step_done = true
+}
+
+// ---------------------------------------------------------------------------
+// Connectivity repair
+// ---------------------------------------------------------------------------
+
+CONNECT_MAX_TRIES :: 24 // door pairs tried, nearest first, before giving up on a link
+
+door_neighbor_free :: proc(d: ^Dungeon, x, y: int) -> bool {
+	if !grid_in_bounds(d, x, y) do return false
+	ct := d.grid[grid_index(d, x, y)].cell_type
+	return ct == .Empty || ct == .Corridor
+}
+
+// Carve a corridor from any module in `from` to any module in `to`, trying their free door
+// pairs from nearest to farthest until A* finds a path. Marks both doors connected and
+// returns the two modules it joined.
+connect_module_sets :: proc(d: ^Dungeon, from, to: []int, manhattan_weight: f32) -> (from_module, to_module: int, ok: bool) {
+	Door_Pair :: struct {
+		job:     Corridor_Job,
+		from_di: int,
+		to_di:   int,
+		dist:    int,
+	}
+	pairs := make([dynamic]Door_Pair, context.temp_allocator)
+	for fm in from {
+		a := &d.modules[fm]
+		for fd, fi in a.rot_doors {
+			fx, fy := door_neighbor(fd, a.grid_x, a.grid_y)
+			if !door_neighbor_free(d, fx, fy) do continue
+			for tm in to {
+				b := &d.modules[tm]
+				for td, ti in b.rot_doors {
+					tx, ty := door_neighbor(td, b.grid_x, b.grid_y)
+					if !door_neighbor_free(d, tx, ty) do continue
+					append(&pairs, Door_Pair{
+						job = {from_module = fm, to_module = tm, from_door_gx = fx, from_door_gy = fy, to_door_gx = tx, to_door_gy = ty},
+						from_di = fi,
+						to_di = ti,
+						dist = abs(fx - tx) + abs(fy - ty),
+					})
+				}
+			}
+		}
+	}
+	slice.sort_by(pairs[:], proc(a, b: Door_Pair) -> bool { return a.dist < b.dist })
+
+	for &p in pairs[:min(len(pairs), CONNECT_MAX_TRIES)] {
+		if !connect_rooms_astar(d, p.job, manhattan_weight) do continue
+		connect_door(&d.modules[p.job.from_module], p.from_di, false)
+		connect_door(&d.modules[p.job.to_module], p.to_di, false)
+		return p.job.from_module, p.job.to_module, true
+	}
+	return -1, -1, false
+}
+
+// Group index per module: modules whose cells touch, directly or through corridors, share a
+// group. Wall Border cells (room cells without a module) block. Temp-allocated.
+module_groups :: proc(d: ^Dungeon) -> (group: []int, count: int) {
+	W := d.config.grid_width
+	n := len(d.grid)
+	label := make([]int, n, context.temp_allocator)
+	slice.fill(label, -1)
+	is_open :: proc(c: Grid_Cell) -> bool {
+		return c.cell_type != .Empty && !(c.cell_type == .Room && c.module_id < 0)
+	}
+
+	queue := make([dynamic]int, 0, n, context.temp_allocator)
+	for i in 0 ..< n {
+		if label[i] >= 0 || !is_open(d.grid[i]) do continue
+		label[i] = count
+		clear(&queue)
+		append(&queue, i)
+		for head := 0; head < len(queue); head += 1 {
+			ci := queue[head]
+			x, y := ci % W, ci / W
+			for off in ([4][2]int{{1, 0}, {-1, 0}, {0, 1}, {0, -1}}) {
+				nx, ny := x + off.x, y + off.y
+				if !grid_in_bounds(d, nx, ny) do continue
+				ni := ny * W + nx
+				if label[ni] >= 0 || !is_open(d.grid[ni]) do continue
+				label[ni] = count
+				append(&queue, ni)
+			}
+		}
+		count += 1
+	}
+
+	group = make([]int, len(d.modules), context.temp_allocator)
+	for &m, mi in d.modules {
+		group[mi] = -1
+		for filled, ci in m.rot_mask {
+			if !filled do continue
+			x, y := m.grid_x + ci % m.rot_width, m.grid_y + ci / m.rot_width
+			if grid_in_bounds(d, x, y) do group[mi] = label[y * W + x]
+			break
+		}
+	}
+	return
+}
+
+// Link every group of rooms to the largest one with corridors, nearest door pairs first.
+// Groups that can't be reached are left alone. Returns the number of corridors carved.
+connect_groups :: proc(d: ^Dungeon, manhattan_weight: f32) -> (carved: int) {
+	for {
+		group, count := module_groups(d)
+		if count <= 1 do return
+
+		size := make([]int, count, context.temp_allocator)
+		for g in group do if g >= 0 do size[g] += 1
+		main := 0
+		for s, g in size do if s > size[main] do main = g
+
+		main_mods := make([dynamic]int, context.temp_allocator)
+		for g, mi in group do if g == main do append(&main_mods, mi)
+
+		linked := false
+		for g in 0 ..< count {
+			if g == main || size[g] == 0 do continue
+			other := make([dynamic]int, context.temp_allocator)
+			for gm, mi in group do if gm == g do append(&other, mi)
+			if _, _, ok := connect_module_sets(d, main_mods[:], other[:], manhattan_weight); ok {
+				carved += 1
+				linked = true
+				break // groups changed; recompute
+			}
+		}
+		if !linked do return
+	}
+}
+
+// Connect_Groups step: corridors between groups of rooms that can't reach each other.
+execute_connect_groups :: proc(d: ^Dungeon, params: ^Connect_Groups_Params) {
+	connect_groups(d, params.manhattan_weight)
 	d.step_done = true
 }

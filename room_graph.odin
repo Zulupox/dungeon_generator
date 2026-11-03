@@ -101,6 +101,7 @@ Graph_Edge :: struct {
 	weight:   f32,
 	tree:     bool, // part of the spanning tree (vs. an extra loop edge)
 	realized: bool, // has a door or corridor in the geometry
+	unplanned: bool, // added by placement to reach a cut-off room; not part of the sampled graph
 }
 
 Score_Kind :: enum {

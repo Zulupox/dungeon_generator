@@ -410,5 +410,7 @@ dungeon_generate_step :: proc(d: ^Dungeon) {
 		execute_place_graph(d, &step.place_graph)
 	case .Define_Palette:
 		execute_define_palette(d, &step.define_palette)
+	case .Connect_Groups:
+		execute_connect_groups(d, &step.connect_groups)
 	}
 }
