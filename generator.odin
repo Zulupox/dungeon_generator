@@ -2811,44 +2811,77 @@ door_neighbor_free :: proc(d: ^Dungeon, x, y: int) -> bool {
 	return ct == .Empty || ct == .Corridor
 }
 
-// Carve a corridor from any module in `from` to any module in `to`, trying their free door
-// pairs from nearest to farthest until A* finds a path. Marks both doors connected and
-// returns the two modules it joined.
-connect_module_sets :: proc(d: ^Dungeon, from, to: []int, manhattan_weight: f32) -> (from_module, to_module: int, ok: bool) {
-	Door_Pair :: struct {
-		job:     Corridor_Job,
-		from_di: int,
-		to_di:   int,
-		dist:    int,
+// A place a corridor can leave a module: one of its door slots, or (door = -1) a spot on
+// its outside wall where a new doorway would be knocked through.
+Room_Exit :: struct {
+	module: int,
+	door:   int,       // index into rot_doors, -1 = new doorway
+	slot:   Door_Slot, // the door (for a new doorway: where it would go)
+	x, y:   int,       // free cell just outside
+}
+
+// Exits of a set of modules: their free doors, or, if none of them has one, every spot
+// on their outside walls that faces an empty cell. Temp-allocated.
+module_exits :: proc(d: ^Dungeon, modules: []int) -> [dynamic]Room_Exit {
+	exits := make([dynamic]Room_Exit, context.temp_allocator)
+	for mi in modules {
+		m := &d.modules[mi]
+		for slot, di in m.rot_doors {
+			x, y := door_neighbor(slot, m.grid_x, m.grid_y)
+			if door_neighbor_free(d, x, y) do append(&exits, Room_Exit{mi, di, slot, x, y})
+		}
 	}
-	pairs := make([dynamic]Door_Pair, context.temp_allocator)
-	for fm in from {
-		a := &d.modules[fm]
-		for fd, fi in a.rot_doors {
-			fx, fy := door_neighbor(fd, a.grid_x, a.grid_y)
-			if !door_neighbor_free(d, fx, fy) do continue
-			for tm in to {
-				b := &d.modules[tm]
-				for td, ti in b.rot_doors {
-					tx, ty := door_neighbor(td, b.grid_x, b.grid_y)
-					if !door_neighbor_free(d, tx, ty) do continue
-					append(&pairs, Door_Pair{
-						job = {from_module = fm, to_module = tm, from_door_gx = fx, from_door_gy = fy, to_door_gx = tx, to_door_gy = ty},
-						from_di = fi,
-						to_di = ti,
-						dist = abs(fx - tx) + abs(fy - ty),
-					})
-				}
+	if len(exits) > 0 do return exits
+
+	for mi in modules {
+		m := &d.modules[mi]
+		for filled, ci in m.rot_mask {
+			if !filled do continue
+			lx, ly := ci % m.rot_width, ci / m.rot_width
+			for dir in Direction {
+				slot := Door_Slot{local_x = lx, local_y = ly, direction = dir}
+				x, y := door_neighbor(slot, m.grid_x, m.grid_y)
+				if !grid_in_bounds(d, x, y) || d.grid[grid_index(d, x, y)].cell_type != .Empty do continue
+				append(&exits, Room_Exit{mi, -1, slot, x, y})
 			}
 		}
 	}
-	slice.sort_by(pairs[:], proc(a, b: Door_Pair) -> bool { return a.dist < b.dist })
+	return exits
+}
 
+// Carve a corridor from any module in `from` to any module in `to`, trying exit pairs from
+// nearest to farthest until A* finds a path. Uses free doors; a set with no free door gets
+// a new doorway in its wall. Marks both doors connected and returns the two modules joined.
+connect_module_sets :: proc(d: ^Dungeon, from, to: []int, manhattan_weight: f32) -> (from_module, to_module: int, ok: bool) {
+	Exit_Pair :: struct {
+		a, b: Room_Exit,
+		dist: int,
+	}
+	from_exits := module_exits(d, from)
+	to_exits := module_exits(d, to)
+	pairs := make([dynamic]Exit_Pair, 0, len(from_exits) * len(to_exits), context.temp_allocator)
+	for a in from_exits {
+		for b in to_exits {
+			append(&pairs, Exit_Pair{a, b, abs(a.x - b.x) + abs(a.y - b.y)})
+		}
+	}
+	slice.sort_by(pairs[:], proc(p, q: Exit_Pair) -> bool { return p.dist < q.dist })
+
+	use_exit :: proc(d: ^Dungeon, e: Room_Exit) {
+		m := &d.modules[e.module]
+		di := e.door
+		if di < 0 {
+			append(&m.rot_doors, e.slot)
+			di = len(m.rot_doors) - 1
+		}
+		connect_door(m, di, false)
+	}
 	for &p in pairs[:min(len(pairs), CONNECT_MAX_TRIES)] {
-		if !connect_rooms_astar(d, p.job, manhattan_weight) do continue
-		connect_door(&d.modules[p.job.from_module], p.from_di, false)
-		connect_door(&d.modules[p.job.to_module], p.to_di, false)
-		return p.job.from_module, p.job.to_module, true
+		job := Corridor_Job{from_module = p.a.module, to_module = p.b.module, from_door_gx = p.a.x, from_door_gy = p.a.y, to_door_gx = p.b.x, to_door_gy = p.b.y}
+		if !connect_rooms_astar(d, job, manhattan_weight) do continue
+		use_exit(d, p.a)
+		use_exit(d, p.b)
+		return p.a.module, p.b.module, true
 	}
 	return -1, -1, false
 }

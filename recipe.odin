@@ -469,6 +469,8 @@ recipe_walled_castle_2 :: proc() -> Recipe {
 	s = make_step(.Connect_Doors);    s.connect_doors = {mode = .Minimal, max_per_pair = 1};  s.area_id = 0;  append(&r.steps, s)
 	// Mark any remaining corridor-facing doors
 	s = make_step(.Mark_Doors);                                                                         append(&r.steps, s)
+	// Bridge any rooms the steps above left cut off (does nothing if all are connected)
+	s = make_step(.Connect_Groups);    s.connect_groups = {manhattan_weight = 0.8};                                            append(&r.steps, s)
 	return r
 }
 
@@ -489,6 +491,8 @@ recipe_symmetric_temple :: proc() -> Recipe {
 	s = make_step(.Mirror_Rooms);     s.mirror_rooms = {axis = .X, axis_pos = 0, output_group = "right_wing"}; s.source_group = "left_wing"; s.area_id = 0;  append(&r.steps, s)
 	// Connect all adjacent doors
 	s = make_step(.Connect_Doors);    s.connect_doors = {mode = .All, max_per_pair = 1};                                     append(&r.steps, s)
+	// Bridge any rooms the steps above left cut off (does nothing if all are connected)
+	s = make_step(.Connect_Groups);    s.connect_groups = {manhattan_weight = 0.8};                                            append(&r.steps, s)
 	return r
 }
 
@@ -511,6 +515,8 @@ recipe_symmetric_castle :: proc() -> Recipe {
 	s = make_step(.Place_Symmetric);  s.place_symmetric = {symmetry = .Mirror_XY, axis_x = 0, axis_y = 0, max_rooms = 40}; s.area_id = 0; s.group = "wings";  append(&r.steps, s)
 	// Connect all adjacent doors
 	s = make_step(.Connect_Doors);    s.connect_doors = {mode = .All, max_per_pair = 1};                                     append(&r.steps, s)
+	// Bridge any rooms the steps above left cut off (does nothing if all are connected)
+	s = make_step(.Connect_Groups);    s.connect_groups = {manhattan_weight = 0.8};                                            append(&r.steps, s)
 	return r
 }
 
@@ -579,6 +585,8 @@ recipe_fortified_temple :: proc() -> Recipe {
 	s = make_step(.Pack_Rooms);        s.pack_rooms = {max_rooms = 25}; s.area_id = 1; s.group = "temple";                  append(&r.steps, s)
 	// Connect doors
 	s = make_step(.Connect_Doors);     s.connect_doors = {mode = .All, max_per_pair = 1};                                    append(&r.steps, s)
+	// Bridge any rooms the steps above left cut off (does nothing if all are connected)
+	s = make_step(.Connect_Groups);    s.connect_groups = {manhattan_weight = 0.8};                                            append(&r.steps, s)
 	return r
 }
 
@@ -605,6 +613,8 @@ recipe_temple_progression :: proc() -> Recipe {
 	s = make_step(.Connect_Doors);     s.connect_doors = {mode = .Minimal, max_per_pair = 1};                                    append(&r.steps, s)
 	// Mark corridor-facing doors
 	s = make_step(.Mark_Doors);                                                                                                   append(&r.steps, s)
+	// Bridge any rooms the steps above left cut off (does nothing if all are connected)
+	s = make_step(.Connect_Groups);    s.connect_groups = {manhattan_weight = 0.8};                                            append(&r.steps, s)
 	// Start, boss, keys with locked doors, and treasure
 	s = make_step(.Assign_Roles);      s.assign_roles = DEFAULT_ASSIGN_ROLES;                                                append(&r.steps, s)
 	return r

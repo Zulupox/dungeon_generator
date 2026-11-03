@@ -407,8 +407,8 @@ roles_render_3d :: proc(d: ^Dungeon) {
 		for op in lock {
 			off := DIR_OFFSETS[op.dir]
 			pos := rl.Vector3{(f32(op.x) + 0.5 + f32(off.x) * 0.5) * cs, (wh + 0.3) * 0.5, (f32(op.y) + 0.5 + f32(off.y) * 0.5) * cs}
-			size_x := off.x != 0 ? cs * 0.15 : cs * 0.9
-			size_z := off.y != 0 ? cs * 0.15 : cs * 0.9
+			size_x := off.x != 0 ? cs * 0.3 : cs * 0.95
+			size_z := off.y != 0 ? cs * 0.3 : cs * 0.95
 			rl.DrawCube(pos, size_x, wh + 0.3, size_z, col)
 			rl.DrawCubeWires(pos, size_x, wh + 0.3, size_z, color_darken(col, 0.5))
 		}
@@ -424,11 +424,14 @@ roles_draw_labels :: proc(d: ^Dungeon, camera: rl.Camera3D) {
 	cs := d.config.cell_size
 	wh := d.config.wall_height
 
-	label :: proc(dl: ^imgui.DrawList, camera: rl.Camera3D, forward, world: rl.Vector3, text: cstring, col: rl.Color) {
+	// above: sit above the point (keeps lock gates visible); otherwise just below it,
+	// leaving the centre for room-graph names
+	label :: proc(dl: ^imgui.DrawList, camera: rl.Camera3D, forward, world: rl.Vector3, text: cstring, col: rl.Color, above := false) {
 		if rl.Vector3DotProduct(world - camera.position, forward) <= 0 do return
 		screen := rl.GetWorldToScreen(world, camera)
+		if screen_behind_panel(screen) do return
 		size := imgui.CalcTextSize(text)
-		tl := imgui.Vec2{screen.x - size.x * 0.5 - 4, screen.y - size.y * 0.5 - 2}
+		tl := imgui.Vec2{screen.x - size.x * 0.5 - 4, above ? screen.y - size.y - 14 : screen.y + 6}
 		imgui.DrawList_AddRectFilled(dl, tl, {tl.x + size.x + 8, tl.y + size.y + 4}, imgui.ColorConvertFloat4ToU32({0, 0, 0, 0.7}), 3)
 		imgui.DrawList_AddText(dl, {tl.x + 4, tl.y + 2}, imgui.ColorConvertFloat4ToU32(color_to_vec4(col)), text)
 	}
@@ -448,6 +451,11 @@ roles_draw_labels :: proc(d: ^Dungeon, camera: rl.Camera3D) {
 		op := lock[0]
 		off := DIR_OFFSETS[op.dir]
 		world := rl.Vector3{(f32(op.x) + 0.5 + f32(off.x) * 0.5) * cs, wh + 0.4, (f32(op.y) + 0.5 + f32(off.y) * 0.5) * cs}
-		label(draw_list, camera, forward, world, fmt.ctprintf("Lock %d", li + 1), KEY_COLORS[li % MAX_LOCKS])
+		label(draw_list, camera, forward, world, fmt.ctprintf("Lock %d", li + 1), KEY_COLORS[li % MAX_LOCKS], above = true)
 	}
+}
+
+// True if a screen point is under the side panel (labels there would show through it).
+screen_behind_panel :: proc(screen: rl.Vector2) -> bool {
+	return state.show_ui && screen.x < f32(PANEL_WIDTH)
 }

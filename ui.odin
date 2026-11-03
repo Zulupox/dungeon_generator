@@ -787,6 +787,7 @@ draw_module_labels :: proc(d: ^Dungeon, camera: rl.Camera3D) {
 		if rl.Vector3DotProduct(world - camera.position, forward) <= 0 do continue
 
 		screen := rl.GetWorldToScreen(world, camera)
+		if screen_behind_panel(screen) do continue
 		lines := [3]cstring{
 			fmt.ctprintf("%s", tmpl.name),
 			fmt.ctprintf("%dx%d, %d cells", tmpl.width, tmpl.height, template_cell_count(tmpl)),
