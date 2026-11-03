@@ -8,6 +8,7 @@
 				70,
 				255
 			],
+			"type": "Generic",
 			"rows": [
 				"XX",
 				"XX"
@@ -43,6 +44,7 @@
 				180,
 				255
 			],
+			"type": "Generic",
 			"rows": [
 				"XXX",
 				"XXX",
@@ -79,6 +81,7 @@
 				160,
 				255
 			],
+			"type": "Corridor",
 			"rows": [
 				"XXXX",
 				"XXXX"
@@ -114,6 +117,7 @@
 				180,
 				255
 			],
+			"type": "Barracks",
 			"rows": [
 				"XXX",
 				"XXX",
@@ -145,6 +149,7 @@
 				80,
 				255
 			],
+			"type": "Generic",
 			"rows": [
 				".X.",
 				"XXX",
@@ -181,6 +186,7 @@
 				50,
 				255
 			],
+			"type": "Great_Hall",
 			"rows": [
 				"XXXX",
 				"XXXX",
@@ -239,6 +245,7 @@
 				40,
 				255
 			],
+			"type": "Throne_Room",
 			"rows": [
 				"XXXXXX",
 				"XXXXXX",
@@ -303,6 +310,868 @@
 			]
 		},
 		{
+			"name": "Small Barracks",
+			"color": [
+				140,
+				90,
+				170,
+				255
+			],
+			"type": "Barracks",
+			"rows": [
+				"XX",
+				"XX",
+				"XX"
+			],
+			"doors": [
+				{
+					"x": 0,
+					"y": 0,
+					"dir": "N"
+				},
+				{
+					"x": 1,
+					"y": 2,
+					"dir": "S"
+				},
+				{
+					"x": 1,
+					"y": 1,
+					"dir": "E"
+				},
+				{
+					"x": 0,
+					"y": 1,
+					"dir": "W"
+				}
+			]
+		},
+		{
+			"name": "Large Barracks",
+			"color": [
+				130,
+				70,
+				160,
+				255
+			],
+			"type": "Barracks",
+			"rows": [
+				"XXX",
+				"XXX",
+				"XXX",
+				"XXX"
+			],
+			"doors": [
+				{
+					"x": 1,
+					"y": 0,
+					"dir": "N"
+				},
+				{
+					"x": 1,
+					"y": 3,
+					"dir": "S"
+				},
+				{
+					"x": 2,
+					"y": 1,
+					"dir": "E"
+				},
+				{
+					"x": 0,
+					"y": 2,
+					"dir": "W"
+				}
+			]
+		},
+		{
+			"name": "Armory Narrow",
+			"color": [
+				90,
+				110,
+				130,
+				255
+			],
+			"type": "Armory",
+			"rows": [
+				"XX",
+				"XX",
+				"XX"
+			],
+			"doors": [
+				{
+					"x": 0,
+					"y": 0,
+					"dir": "N"
+				},
+				{
+					"x": 1,
+					"y": 2,
+					"dir": "S"
+				},
+				{
+					"x": 1,
+					"y": 0,
+					"dir": "E"
+				}
+			]
+		},
+		{
+			"name": "Armory Wide",
+			"color": [
+				80,
+				100,
+				140,
+				255
+			],
+			"type": "Armory",
+			"rows": [
+				"XXX",
+				"XXX",
+				"XXX"
+			],
+			"doors": [
+				{
+					"x": 1,
+					"y": 0,
+					"dir": "N"
+				},
+				{
+					"x": 1,
+					"y": 2,
+					"dir": "S"
+				},
+				{
+					"x": 2,
+					"y": 1,
+					"dir": "E"
+				},
+				{
+					"x": 0,
+					"y": 1,
+					"dir": "W"
+				}
+			]
+		},
+		{
+			"name": "Kitchen",
+			"color": [
+				190,
+				140,
+				90,
+				255
+			],
+			"type": "Kitchen",
+			"rows": [
+				"XX",
+				"XX",
+				"XX"
+			],
+			"doors": [
+				{
+					"x": 0,
+					"y": 0,
+					"dir": "N"
+				},
+				{
+					"x": 1,
+					"y": 2,
+					"dir": "S"
+				},
+				{
+					"x": 1,
+					"y": 1,
+					"dir": "E"
+				}
+			]
+		},
+		{
+			"name": "Large Kitchen",
+			"color": [
+				180,
+				130,
+				80,
+				255
+			],
+			"type": "Kitchen",
+			"rows": [
+				"XXX",
+				"XXX",
+				"XXX"
+			],
+			"doors": [
+				{
+					"x": 1,
+					"y": 0,
+					"dir": "N"
+				},
+				{
+					"x": 1,
+					"y": 2,
+					"dir": "S"
+				},
+				{
+					"x": 2,
+					"y": 1,
+					"dir": "E"
+				},
+				{
+					"x": 0,
+					"y": 1,
+					"dir": "W"
+				}
+			]
+		},
+		{
+			"name": "Dining Hall",
+			"color": [
+				170,
+				120,
+				60,
+				255
+			],
+			"type": "Dining_Hall",
+			"rows": [
+				"XXXX",
+				"XXXX",
+				"XXXX"
+			],
+			"doors": [
+				{
+					"x": 1,
+					"y": 0,
+					"dir": "N"
+				},
+				{
+					"x": 2,
+					"y": 0,
+					"dir": "N"
+				},
+				{
+					"x": 1,
+					"y": 2,
+					"dir": "S"
+				},
+				{
+					"x": 3,
+					"y": 1,
+					"dir": "E"
+				},
+				{
+					"x": 0,
+					"y": 1,
+					"dir": "W"
+				}
+			]
+		},
+		{
+			"name": "Banquet Hall",
+			"color": [
+				160,
+				110,
+				50,
+				255
+			],
+			"type": "Dining_Hall",
+			"rows": [
+				"XXXXX",
+				"XXXXX",
+				"XXXXX"
+			],
+			"doors": [
+				{
+					"x": 2,
+					"y": 0,
+					"dir": "N"
+				},
+				{
+					"x": 2,
+					"y": 2,
+					"dir": "S"
+				},
+				{
+					"x": 4,
+					"y": 1,
+					"dir": "E"
+				},
+				{
+					"x": 0,
+					"y": 1,
+					"dir": "W"
+				}
+			]
+		},
+		{
+			"name": "Bedroom",
+			"color": [
+				120,
+				160,
+				200,
+				255
+			],
+			"type": "Bedroom",
+			"rows": [
+				"XX",
+				"XX"
+			],
+			"doors": [
+				{
+					"x": 1,
+					"y": 1,
+					"dir": "S"
+				},
+				{
+					"x": 0,
+					"y": 0,
+					"dir": "W"
+				}
+			]
+		},
+		{
+			"name": "Suite",
+			"color": [
+				100,
+				140,
+				190,
+				255
+			],
+			"type": "Bedroom",
+			"rows": [
+				"XXX",
+				"XXX"
+			],
+			"doors": [
+				{
+					"x": 1,
+					"y": 0,
+					"dir": "N"
+				},
+				{
+					"x": 1,
+					"y": 1,
+					"dir": "S"
+				},
+				{
+					"x": 0,
+					"y": 0,
+					"dir": "W"
+				}
+			]
+		},
+		{
+			"name": "Vault",
+			"color": [
+				220,
+				190,
+				60,
+				255
+			],
+			"type": "Treasury",
+			"rows": [
+				"XX",
+				"XX"
+			],
+			"doors": [
+				{
+					"x": 0,
+					"y": 0,
+					"dir": "N"
+				}
+			]
+		},
+		{
+			"name": "Treasury",
+			"color": [
+				200,
+				180,
+				40,
+				255
+			],
+			"type": "Treasury",
+			"rows": [
+				"XXX",
+				"XXX"
+			],
+			"doors": [
+				{
+					"x": 1,
+					"y": 0,
+					"dir": "N"
+				}
+			]
+		},
+		{
+			"name": "Guard Post",
+			"color": [
+				160,
+				150,
+				140,
+				255
+			],
+			"type": "Guard_Room",
+			"rows": [
+				"XX",
+				"XX"
+			],
+			"doors": [
+				{
+					"x": 0,
+					"y": 0,
+					"dir": "N"
+				},
+				{
+					"x": 1,
+					"y": 1,
+					"dir": "S"
+				},
+				{
+					"x": 1,
+					"y": 0,
+					"dir": "E"
+				},
+				{
+					"x": 0,
+					"y": 1,
+					"dir": "W"
+				}
+			]
+		},
+		{
+			"name": "Guardhouse",
+			"color": [
+				150,
+				140,
+				130,
+				255
+			],
+			"type": "Guard_Room",
+			"rows": [
+				"XX",
+				"XX",
+				"XX"
+			],
+			"doors": [
+				{
+					"x": 0,
+					"y": 0,
+					"dir": "N"
+				},
+				{
+					"x": 1,
+					"y": 2,
+					"dir": "S"
+				},
+				{
+					"x": 1,
+					"y": 1,
+					"dir": "E"
+				},
+				{
+					"x": 0,
+					"y": 1,
+					"dir": "W"
+				}
+			]
+		},
+		{
+			"name": "Chapel",
+			"color": [
+				200,
+				200,
+				230,
+				255
+			],
+			"type": "Chapel",
+			"rows": [
+				"XXX",
+				"XXX",
+				"XXX",
+				"XXX"
+			],
+			"doors": [
+				{
+					"x": 1,
+					"y": 0,
+					"dir": "N"
+				},
+				{
+					"x": 1,
+					"y": 3,
+					"dir": "S"
+				},
+				{
+					"x": 2,
+					"y": 2,
+					"dir": "E"
+				},
+				{
+					"x": 0,
+					"y": 2,
+					"dir": "W"
+				}
+			]
+		},
+		{
+			"name": "Small Shrine",
+			"color": [
+				190,
+				190,
+				220,
+				255
+			],
+			"type": "Chapel",
+			"rows": [
+				"XX.",
+				"XXX",
+				"XX."
+			],
+			"doors": [
+				{
+					"x": 0,
+					"y": 0,
+					"dir": "N"
+				},
+				{
+					"x": 0,
+					"y": 2,
+					"dir": "S"
+				},
+				{
+					"x": 2,
+					"y": 1,
+					"dir": "E"
+				}
+			]
+		},
+		{
+			"name": "Study",
+			"color": [
+				100,
+				70,
+				50,
+				255
+			],
+			"type": "Library",
+			"rows": [
+				"XX",
+				"XX",
+				"XX"
+			],
+			"doors": [
+				{
+					"x": 0,
+					"y": 0,
+					"dir": "N"
+				},
+				{
+					"x": 0,
+					"y": 2,
+					"dir": "W"
+				}
+			]
+		},
+		{
+			"name": "Library",
+			"color": [
+				110,
+				80,
+				60,
+				255
+			],
+			"type": "Library",
+			"rows": [
+				"XXX",
+				"XXX",
+				"XXX",
+				"XXX"
+			],
+			"doors": [
+				{
+					"x": 1,
+					"y": 0,
+					"dir": "N"
+				},
+				{
+					"x": 1,
+					"y": 3,
+					"dir": "S"
+				},
+				{
+					"x": 0,
+					"y": 2,
+					"dir": "W"
+				}
+			]
+		},
+		{
+			"name": "Store Room",
+			"color": [
+				140,
+				130,
+				100,
+				255
+			],
+			"type": "Storage",
+			"rows": [
+				"XX",
+				"XX"
+			],
+			"doors": [
+				{
+					"x": 0,
+					"y": 0,
+					"dir": "N"
+				},
+				{
+					"x": 1,
+					"y": 1,
+					"dir": "E"
+				}
+			]
+		},
+		{
+			"name": "Cellar",
+			"color": [
+				130,
+				120,
+				90,
+				255
+			],
+			"type": "Storage",
+			"rows": [
+				"XX",
+				"XX",
+				"XX"
+			],
+			"doors": [
+				{
+					"x": 0,
+					"y": 0,
+					"dir": "N"
+				},
+				{
+					"x": 1,
+					"y": 1,
+					"dir": "E"
+				},
+				{
+					"x": 0,
+					"y": 2,
+					"dir": "W"
+				}
+			]
+		},
+		{
+			"name": "Courtyard",
+			"color": [
+				100,
+				160,
+				100,
+				255
+			],
+			"type": "Courtyard",
+			"rows": [
+				"XXXX",
+				"X..X",
+				"X..X",
+				"XXXX"
+			],
+			"doors": [
+				{
+					"x": 1,
+					"y": 0,
+					"dir": "N"
+				},
+				{
+					"x": 2,
+					"y": 0,
+					"dir": "N"
+				},
+				{
+					"x": 1,
+					"y": 3,
+					"dir": "S"
+				},
+				{
+					"x": 2,
+					"y": 3,
+					"dir": "S"
+				},
+				{
+					"x": 3,
+					"y": 1,
+					"dir": "E"
+				},
+				{
+					"x": 3,
+					"y": 2,
+					"dir": "E"
+				},
+				{
+					"x": 0,
+					"y": 1,
+					"dir": "W"
+				},
+				{
+					"x": 0,
+					"y": 2,
+					"dir": "W"
+				}
+			]
+		},
+		{
+			"name": "Small Yard",
+			"color": [
+				110,
+				170,
+				110,
+				255
+			],
+			"type": "Courtyard",
+			"rows": [
+				"XXX",
+				"X.X",
+				"XXX"
+			],
+			"doors": [
+				{
+					"x": 1,
+					"y": 0,
+					"dir": "N"
+				},
+				{
+					"x": 1,
+					"y": 2,
+					"dir": "S"
+				},
+				{
+					"x": 2,
+					"y": 1,
+					"dir": "E"
+				},
+				{
+					"x": 0,
+					"y": 1,
+					"dir": "W"
+				}
+			]
+		},
+		{
+			"name": "Gate Passage",
+			"color": [
+				140,
+				140,
+				150,
+				255
+			],
+			"type": "Gatehouse",
+			"rows": [
+				"XX",
+				"XX",
+				"XX",
+				"XX"
+			],
+			"doors": [
+				{
+					"x": 0,
+					"y": 0,
+					"dir": "N"
+				},
+				{
+					"x": 1,
+					"y": 0,
+					"dir": "N"
+				},
+				{
+					"x": 0,
+					"y": 3,
+					"dir": "S"
+				},
+				{
+					"x": 1,
+					"y": 3,
+					"dir": "S"
+				},
+				{
+					"x": 1,
+					"y": 1,
+					"dir": "E"
+				},
+				{
+					"x": 0,
+					"y": 2,
+					"dir": "W"
+				}
+			]
+		},
+		{
+			"name": "Fortified Gate",
+			"color": [
+				130,
+				130,
+				140,
+				255
+			],
+			"type": "Gatehouse",
+			"rows": [
+				"XXX",
+				"XXX",
+				"X.X"
+			],
+			"doors": [
+				{
+					"x": 1,
+					"y": 0,
+					"dir": "N"
+				},
+				{
+					"x": 0,
+					"y": 2,
+					"dir": "S"
+				},
+				{
+					"x": 2,
+					"y": 2,
+					"dir": "S"
+				},
+				{
+					"x": 2,
+					"y": 1,
+					"dir": "E"
+				},
+				{
+					"x": 0,
+					"y": 1,
+					"dir": "W"
+				}
+			]
+		},
+		{
+			"name": "Long Corridor",
+			"color": [
+				50,
+				150,
+				140,
+				255
+			],
+			"type": "Corridor",
+			"rows": [
+				"XXXXX"
+			],
+			"doors": [
+				{
+					"x": 0,
+					"y": 0,
+					"dir": "W"
+				},
+				{
+					"x": 4,
+					"y": 0,
+					"dir": "E"
+				}
+			]
+		},
+		{
 			"name": "round",
 			"color": [
 				70,
@@ -310,6 +1179,7 @@
 				180,
 				255
 			],
+			"type": "Generic",
 			"rows": [
 				".XXX.",
 				"XXXXX",

@@ -1,7 +1,9 @@
 package dungeon_generator
 
 import "core:encoding/json"
+import "core:fmt"
 import "core:os"
+import "core:reflect"
 import "core:slice"
 import "core:strings"
 
@@ -21,6 +23,7 @@ template_clone :: proc(src: ^Module_Template) -> Module_Template {
 		mask       = slice.clone(src.mask),
 		door_slots = slice.clone(src.door_slots),
 		color      = src.color,
+		room_type  = src.room_type,
 	}
 }
 
@@ -161,6 +164,7 @@ Json_Door :: struct {
 Json_Template :: struct {
 	name:  string      `json:"name"`,
 	color: [4]u8       `json:"color"`,
+	type:  string      `json:"type"`, // Room_Type name, e.g. "Kitchen"; missing = Generic
 	rows:  []string    `json:"rows"`,
 	doors: []Json_Door `json:"doors"`,
 }
@@ -193,7 +197,7 @@ templates_save :: proc(filepath: string) -> bool {
 		for slot, di in t.door_slots {
 			doors[di] = {x = slot.local_x, y = slot.local_y, dir = DIRECTION_CODES[slot.direction]}
 		}
-		jts[i] = {name = t.name, color = t.color, rows = rows, doors = doors}
+		jts[i] = {name = t.name, color = t.color, type = fmt.tprint(t.room_type), rows = rows, doors = doors}
 	}
 
 	opts := json.Marshal_Options{
@@ -227,6 +231,9 @@ templates_load :: proc(filepath: string) -> bool {
 			height = h,
 			mask   = make([]bool, w * h),
 			color  = j.color,
+		}
+		if rt, ok := reflect.enum_from_name(Room_Type, j.type); ok {
+			t.room_type = rt
 		}
 		for row, y in j.rows {
 			for x in 0 ..< len(row) {
