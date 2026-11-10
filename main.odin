@@ -54,8 +54,15 @@ main :: proc() {
 	}
 
 	// Headless export for mesh_any:
-	//   dungeon_generator.exe -export-nav:<path> [-seed:<n>]
+	//   dungeon_generator.exe -export-nav:<path> [-seed:<n>] [-cell:<m>] [-wall:<m>]
 	if export_path, seed, ok := parse_export_args(); ok {
+		for a in os.args[1:] {
+			if strings.has_prefix(a, "-cell:") {
+				if v, vok := strconv.parse_f32(a[len("-cell:"):]); vok do config.cell_size = v
+			} else if strings.has_prefix(a, "-wall:") {
+				if v, vok := strconv.parse_f32(a[len("-wall:"):]); vok do config.wall_height = v
+			}
+		}
 		templates_init()
 		d := dungeon_create(config)
 		d.recipe = recipe_classic_dungeon()
