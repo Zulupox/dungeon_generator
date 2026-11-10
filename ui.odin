@@ -531,6 +531,10 @@ draw_ui :: proc() {
 			if imgui.IsItemHovered() do imgui.SetTooltip("Start, boss, keys, locks and treasure\nfrom an Assign Roles step")
 			imgui.Checkbox("Merge Room Walls", &merge_room_walls)
 			if imgui.IsItemHovered() do imgui.SetTooltip("Hide walls between touching rooms.\nDisplay only; the Join Rooms step merges rooms for real.")
+			if imgui.Button("Export Nav Input") {
+				dungeon_export_navin_file(d, NAV_EXPORT_PATH)
+			}
+			if imgui.IsItemHovered() do imgui.SetTooltip("Write " + NAV_EXPORT_PATH + " for the mesh_any viewer")
 			imgui.Separator()
 			imgui.SliderFloat("Anim Speed", &gen_step_interval, 0.01, 0.3, "%.2fs")
 			imgui.Checkbox("Animated Mode", &state.gen_animated)

@@ -1,6 +1,9 @@
 package dungeon_generator
 
+import "core:fmt"
 import "core:os"
+import "core:strconv"
+import "core:strings"
 import rl "vendor:raylib"
 
 import imgui "libs/odin-imgui"
@@ -50,6 +53,21 @@ main :: proc() {
 		os.exit(room_graph_selftest() && graph_placement_selftest() ? 0 : 1)
 	}
 
+	// Headless export for mesh_any:
+	//   dungeon_generator.exe -export-nav:<path> [-seed:<n>]
+	if export_path, seed, ok := parse_export_args(); ok {
+		templates_init()
+		d := dungeon_create(config)
+		d.recipe = recipe_classic_dungeon()
+		if seed != 0 do d.recipe.seed = seed
+		dungeon_generate_full(&d)
+		ok_write := dungeon_export_navin_file(&d, export_path)
+		fmt.printfln("export %s (seed %d): %s", export_path, d.actual_seed, ok_write ? "ok" : "FAILED")
+		dungeon_destroy(&d)
+		templates_destroy()
+		os.exit(ok_write ? 0 : 1)
+	}
+
 	rl.InitWindow(1280, 800, "Procedural Dungeon Generator")
 	defer rl.CloseWindow()
 	rl.SetTargetFPS(60)
@@ -91,6 +109,18 @@ main :: proc() {
 	}
 
 	dungeon_destroy(&state.dungeon)
+}
+
+parse_export_args :: proc() -> (path: string, seed: u64, ok: bool) {
+	for a in os.args[1:] {
+		if strings.has_prefix(a, "-export-nav:") {
+			path = a[len("-export-nav:"):]
+			ok = len(path) > 0
+		} else if strings.has_prefix(a, "-seed:") {
+			seed, _ = strconv.parse_u64(a[len("-seed:"):])
+		}
+	}
+	return
 }
 
 // ---------------------------------------------------------------------------

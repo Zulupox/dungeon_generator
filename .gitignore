@@ -8,3 +8,6 @@ dungeon_generator
 # Windows build output
 *.exe
 *.pdb
+
+# mesh_any nav exports
+exports/
