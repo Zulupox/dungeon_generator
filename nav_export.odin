@@ -121,6 +121,25 @@ dungeon_export_navin :: proc(d: ^Dungeon, include_ceilings := true) -> string {
 			}
 		}
 	}
+
+	// Reachability seed (mesh_any prunes polys not reachable from it, e.g.
+	// roof tops): centre of a start-room cell, else the first room cell.
+	want := d.roles.assigned ? d.roles.start : -1
+	seed_found := false
+	for pass in 0 ..< 2 {
+		for gy in 0 ..< d.config.grid_height {
+			for gx in 0 ..< d.config.grid_width {
+				cell := &d.grid[grid_index(d, gx, gy)]
+				if cell.cell_type != .Room do continue
+				if pass == 0 && (want < 0 || cell.module_id != want) do continue
+				fmt.sbprintf(&b, "seed %d 0 %d\n", i32(gx) * cs + cs / 2, i32(gy) * cs + cs / 2)
+				seed_found = true
+				break
+			}
+			if seed_found do break
+		}
+		if seed_found do break
+	}
 	return strings.to_string(b)
 }
 
